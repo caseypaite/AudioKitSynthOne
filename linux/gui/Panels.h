@@ -24,6 +24,9 @@ struct UiState {
     Panel bottomPanel = Panel::Effects;
     bool  showKeyboard = true;
     bool  showPresets = false;
+    /// false = the two panels stack top/bottom; true = split by a vertical
+    /// divider so they sit left/right.
+    bool  sideBySide = false;
 
     // Keyboard
     int   firstOctave = 3;

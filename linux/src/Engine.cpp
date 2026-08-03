@@ -583,19 +583,33 @@ bool Engine::applyTuning(int index) {
 // Presets
 // ---------------------------------------------------------------------------
 
-bool Engine::loadBanks(std::string &error) {
-    const fs::path dataDir = fs::path(mResourceDir) / "Presets" / "Data";
-    std::error_code ec;
-    if (!fs::exists(dataDir, ec)) {
-        error = "no preset directory at " + dataDir.string();
-        return false;
+std::string Engine::defaultUserDataDir() {
+    if (const char *xdg = std::getenv("XDG_DATA_HOME")) {
+        if (*xdg != '\0') return (fs::path(xdg) / "synthone" / "presets").string();
     }
+    if (const char *home = std::getenv("HOME")) {
+        if (*home != '\0') {
+            return (fs::path(home) / ".local" / "share" / "synthone" / "presets").string();
+        }
+    }
+    return "./synthone-presets";
+}
+
+bool Engine::bankIsWritable(const std::string &bank) const {
+    for (const auto &b : mBanks) {
+        if (b.name == bank) return b.isUser;
+    }
+    return true; // a bank that does not exist yet will be created in the user dir
+}
+
+void Engine::loadBanksFrom(const std::string &dirName, bool isUser) {
+    const fs::path dir(dirName);
+    std::error_code ec;
+    if (!fs::exists(dir, ec)) return;
 
     std::vector<fs::path> files;
-    for (const auto &entry : fs::directory_iterator(dataDir, ec)) {
-        if (entry.path().extension() == ".json") {
-            files.push_back(entry.path());
-        }
+    for (const auto &entry : fs::directory_iterator(dir, ec)) {
+        if (entry.path().extension() == ".json") files.push_back(entry.path());
     }
     std::sort(files.begin(), files.end());
 
@@ -609,6 +623,7 @@ bool Engine::loadBanks(std::string &error) {
 
         Bank bank;
         bank.name = file.stem().string();
+        bank.isUser = isUser;
         for (const auto &preset : doc.arrayValue) {
             if (!preset.isObject()) continue;
             PresetInfo info;
@@ -619,13 +634,34 @@ bool Engine::loadBanks(std::string &error) {
             bank.info.push_back(info);
             bank.presets.push_back(preset);
         }
-        if (!bank.presets.empty()) {
-            mBanks.push_back(std::move(bank));
+        if (bank.presets.empty()) continue;
+
+        bool replaced = false;
+        for (auto &existing : mBanks) {
+            if (existing.name == bank.name) {
+                existing = std::move(bank);
+                replaced = true;
+                break;
+            }
         }
+        if (!replaced) mBanks.push_back(std::move(bank));
+    }
+}
+
+bool Engine::loadBanks(std::string &error) {
+    const fs::path factoryDir = fs::path(mResourceDir) / "Presets" / "Data";
+    std::error_code ec;
+    if (!fs::exists(factoryDir, ec)) {
+        error = "no preset directory at " + factoryDir.string();
+        return false;
     }
 
+    loadBanksFrom(factoryDir.string(), false);
+    // User banks are optional; the directory may not exist yet.
+    loadBanksFrom(mUserDir, true);
+
     if (mBanks.empty()) {
-        error = "no readable preset banks in " + dataDir.string();
+        error = "no readable preset banks in " + factoryDir.string();
         return false;
     }
     return true;
@@ -730,9 +766,16 @@ bool Engine::savePreset(const std::string &bankName, int position, const std::st
         if (b.name == bankName) { bank = &b; break; }
     }
     if (bank == nullptr) {
-        mBanks.push_back(Bank{bankName, {}, {}});
+        Bank created;
+        created.name = bankName;
+        created.isUser = true;
+        mBanks.push_back(std::move(created));
         bank = &mBanks.back();
     }
+
+    // Saving into a factory bank promotes it to a user bank: the whole bank is
+    // written to the user directory and the shipped file is left alone.
+    bank->isUser = true;
 
     // Start from the existing preset when overwriting, so unknown keys survive.
     JsonValue preset;
@@ -792,10 +835,15 @@ bool Engine::savePreset(const std::string &bankName, int position, const std::st
         bank->info.push_back(info);
     }
 
-    // Write the whole bank back out.
-    const fs::path dataDir = fs::path(mResourceDir) / "Presets" / "Data";
+    // Write the whole bank out to the user directory -- never into the source
+    // tree's factory banks.
+    const fs::path dataDir(mUserDir);
     std::error_code ec;
     fs::create_directories(dataDir, ec);
+    if (ec) {
+        error = "cannot create " + dataDir.string() + ": " + ec.message();
+        return false;
+    }
     const fs::path file = dataDir / (bankName + ".json");
 
     std::ostringstream os;

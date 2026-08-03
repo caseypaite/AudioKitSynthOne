@@ -82,20 +82,44 @@ void applyDarkStyle() {
 }
 
 /// Panel selector strip, standing in for the NavButtons on iOS.
-void panelTabs(const char *id, s1gui::Panel &current) {
+///
+/// Synth One shows two panels stacked, each independently navigable, so there
+/// are two of these. `other` is the panel showing in the opposite slot: iOS
+/// refuses to put the same panel on screen twice (PanelController's "make sure
+/// the same view doesn't appear twice"), and here picking the one already
+/// opposite swaps the two rather than duplicating it.
+void panelTabs(const char *id, const char *label, s1gui::Panel &current, s1gui::Panel &other) {
     ImGui::PushID(id);
+
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextColored(ImColor(s1gui::color::kTextDim), "%s", label);
+    ImGui::SameLine(0.0f, 8.0f);
+
     for (int i = 0; i < static_cast<int>(s1gui::Panel::Count); ++i) {
         const s1gui::Panel panel = static_cast<s1gui::Panel>(i);
         if (i > 0) ImGui::SameLine(0.0f, 3.0f);
+
         const bool selected = (panel == current);
+        const bool opposite = (panel == other);
+
         ImGui::PushStyleColor(ImGuiCol_Button,
                               selected ? ImColor(s1gui::color::kAccentDim).Value
                                        : ImColor(s1gui::color::kKnobBody).Value);
+        // The panel showing opposite is dimmed: still clickable, but it swaps.
         ImGui::PushStyleColor(ImGuiCol_Text,
-                              selected ? ImColor(s1gui::color::kText).Value
-                                       : ImColor(s1gui::color::kTextDim).Value);
+                              selected  ? ImColor(s1gui::color::kText).Value
+                              : opposite ? ImColor(s1gui::color::kOnDim).Value
+                                         : ImColor(s1gui::color::kTextDim).Value);
         ImGui::PushID(i);
-        if (ImGui::Button(s1gui::PanelName(panel), ImVec2(74, 0))) current = panel;
+        if (ImGui::Button(s1gui::PanelName(panel), ImVec2(74, 0))) {
+            if (panel == other) {
+                other = current; // swap rather than show the same panel twice
+            }
+            current = panel;
+        }
+        if (opposite && ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("showing in the other slot - click to swap");
+        }
         ImGui::PopID();
         ImGui::PopStyleColor(2);
     }
@@ -107,10 +131,11 @@ void panelTabs(const char *id, s1gui::Panel &current) {
 int main(int argc, char **argv) {
     std::string backendName;
     std::string resourceDir = S1_DEFAULT_RESOURCE_DIR;
+    std::string userDir;
     std::string midiSpec = "all";
     std::string tuningsPath = S1_TUNINGS_JSON;
     int windowWidth = 1440, windowHeight = 900;
-    std::string topPanelName, bottomPanelName;
+    std::string topPanelName, bottomPanelName, layoutName;
 
     auto panelByName = [](const std::string &name, s1gui::Panel &out) {
         for (int i = 0; i < static_cast<int>(s1gui::Panel::Count); ++i) {
@@ -127,10 +152,12 @@ int main(int argc, char **argv) {
         auto next = [&]() -> std::string { return (i + 1 < argc) ? argv[++i] : std::string(); };
         if (arg == "--backend") backendName = next();
         else if (arg == "--resources") resourceDir = next();
+        else if (arg == "--user-dir") userDir = next();
         else if (arg == "--midi") midiSpec = next();
         else if (arg == "--tunings") tuningsPath = next();
         else if (arg == "--top") topPanelName = next();
         else if (arg == "--bottom") bottomPanelName = next();
+        else if (arg == "--layout") layoutName = next();
         else if (arg == "--geometry") {
             const std::string g = next();
             const size_t x = g.find('x');
@@ -142,6 +169,7 @@ int main(int argc, char **argv) {
             std::printf("usage: synthone-gui [--backend jack|portaudio] [--resources DIR]\n"
                         "                    [--midi CLIENT:PORT|all] [--geometry WxH]\n"
                         "                    [--top PANEL] [--bottom PANEL]\n"
+                        "                    [--layout stacked|side]\n"
                         "  PANEL: MAIN ENV PAD FX SEQ TUNE\n");
             return 0;
         }
@@ -168,6 +196,7 @@ int main(int argc, char **argv) {
         std::fprintf(stderr, "error: %s\n", error.c_str());
         return 1;
     }
+    if (!userDir.empty()) engine.setUserDataDir(userDir);
     if (!engine.loadBanks(error)) {
         std::fprintf(stderr, "warning: %s\n", error.c_str());
     }
@@ -178,6 +207,13 @@ int main(int argc, char **argv) {
     s1gui::UiState ui;
     if (!topPanelName.empty()) panelByName(topPanelName, ui.topPanel);
     if (!bottomPanelName.empty()) panelByName(bottomPanelName, ui.bottomPanel);
+    if (layoutName == "side" || layoutName == "side-by-side") ui.sideBySide = true;
+    else if (layoutName == "stacked" || layoutName == "stack") ui.sideBySide = false;
+    if (ui.topPanel == ui.bottomPanel) {
+        // Never start with the same panel in both slots.
+        ui.bottomPanel = static_cast<s1gui::Panel>(
+            (static_cast<int>(ui.topPanel) + 1) % static_cast<int>(s1gui::Panel::Count));
+    }
     const auto banks = engine.bankNames();
     if (!banks.empty()) {
         ui.currentBank = banks.front();
@@ -272,21 +308,42 @@ int main(int argc, char **argv) {
         } else {
             const float keyboardHeight = ui.showKeyboard ? 150.0f : 0.0f;
             const float bodyHeight = ImGui::GetContentRegionAvail().y - keyboardHeight;
-            const float panelHeight = bodyHeight * 0.5f - 24.0f;
 
-            panelTabs("top", ui.topPanel);
-            ImGui::PushStyleColor(ImGuiCol_ChildBg, ImColor(s1gui::color::kPanel).Value);
-            ImGui::BeginChild("toppanel", ImVec2(0, panelHeight), ImGuiChildFlags_Borders);
-            s1gui::DrawPanel(ui.topPanel, engine, ui);
-            ImGui::EndChild();
-            ImGui::PopStyleColor();
+            auto drawSlot = [&](const char *childId, s1gui::Panel panel, const ImVec2 &size) {
+                ImGui::PushStyleColor(ImGuiCol_ChildBg, ImColor(s1gui::color::kPanel).Value);
+                ImGui::BeginChild(childId, size, ImGuiChildFlags_Borders);
+                s1gui::DrawPanel(panel, engine, ui);
+                ImGui::EndChild();
+                ImGui::PopStyleColor();
+            };
 
-            panelTabs("bottom", ui.bottomPanel);
-            ImGui::PushStyleColor(ImGuiCol_ChildBg, ImColor(s1gui::color::kPanel).Value);
-            ImGui::BeginChild("bottompanel", ImVec2(0, panelHeight), ImGuiChildFlags_Borders);
-            s1gui::DrawPanel(ui.bottomPanel, engine, ui);
-            ImGui::EndChild();
-            ImGui::PopStyleColor();
+            if (ui.sideBySide) {
+                // Split by a vertical divider: the two panels sit left and right,
+                // each full height. Panels are laid out wide, so each one scrolls
+                // horizontally inside its own pane at this width.
+                const float paneWidth = (ImGui::GetContentRegionAvail().x - 8.0f) * 0.5f;
+                const float paneHeight = bodyHeight - 8.0f;
+
+                ImGui::BeginGroup();
+                panelTabs("top", "LEFT", ui.topPanel, ui.bottomPanel);
+                drawSlot("toppanel", ui.topPanel, ImVec2(paneWidth, paneHeight));
+                ImGui::EndGroup();
+
+                ImGui::SameLine(0.0f, 8.0f);
+
+                ImGui::BeginGroup();
+                panelTabs("bottom", "RIGHT", ui.bottomPanel, ui.topPanel);
+                drawSlot("bottompanel", ui.bottomPanel, ImVec2(paneWidth, paneHeight));
+                ImGui::EndGroup();
+            } else {
+                const float panelHeight = bodyHeight * 0.5f - 24.0f;
+
+                panelTabs("top", "UPPER", ui.topPanel, ui.bottomPanel);
+                drawSlot("toppanel", ui.topPanel, ImVec2(0, panelHeight));
+
+                panelTabs("bottom", "LOWER", ui.bottomPanel, ui.topPanel);
+                drawSlot("bottompanel", ui.bottomPanel, ImVec2(0, panelHeight));
+            }
 
             if (ui.showKeyboard) s1gui::DrawKeyboardBar(engine, ui);
         }

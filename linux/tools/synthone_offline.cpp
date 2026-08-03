@@ -59,6 +59,7 @@ void writeWav(const std::string &path, const std::vector<float> &interleaved, in
     std::cerr <<
         "usage: synthone-offline [options] <out.wav>\n"
         "  --resources DIR   AudioKitSynthOne source dir (default: built-in)\n"
+        "  --user-dir DIR    where user presets are saved (default: XDG data dir)\n"
         "  --bank NAME       preset bank (default: first available)\n"
         "  --preset N        preset position within the bank (default: 0)\n"
         "  --note N          MIDI note to play (default: 60, repeatable)\n"
@@ -81,6 +82,7 @@ void writeWav(const std::string &path, const std::vector<float> &interleaved, in
 
 int main(int argc, char **argv) {
     std::string resourceDir = S1_DEFAULT_RESOURCE_DIR;
+    std::string userDir;
     std::string bank;
     std::string outPath;
     int presetPosition = 0;
@@ -105,6 +107,7 @@ int main(int argc, char **argv) {
             return argv[++i];
         };
         if (arg == "--resources") resourceDir = next();
+        else if (arg == "--user-dir") userDir = next();
         else if (arg == "--bank") bank = next();
         else if (arg == "--preset") presetPosition = std::stoi(next());
         else if (arg == "--note") notes.push_back(std::stoi(next()));
@@ -148,6 +151,7 @@ int main(int argc, char **argv) {
         std::cerr << "error: " << error << "\n";
         return 1;
     }
+    if (!userDir.empty()) engine.setUserDataDir(userDir);
     if (!engine.loadBanks(error)) {
         std::cerr << "warning: " << error << "\n";
     }

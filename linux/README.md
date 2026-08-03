@@ -81,6 +81,20 @@ Rendering without hardware:
 ./build/synthone-offline --note 69 --set arpIsOn=0 --set reverbMix=0 out.wav
 ```
 
+### Where presets live
+
+Factory banks ship read-only in `AudioKitSynthOne/Presets/Data/` and are never
+written to. Presets you save go to
+
+```
+$XDG_DATA_HOME/synthone/presets      (default: ~/.local/share/synthone/presets)
+```
+
+overridable with `--user-dir DIR` on any of the three binaries. A user bank
+shadows a factory bank of the same name, and saving into a factory bank name
+copies that whole bank into your directory first, leaving the shipped file
+untouched -- so the source tree stays clean.
+
 ## How the port works
 
 ### Compatibility layer (`compat/`)

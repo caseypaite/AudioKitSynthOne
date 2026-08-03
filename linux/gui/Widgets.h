@@ -72,6 +72,23 @@ bool ToggleValue(bool &value, const char *label, const ImVec2 &size = ImVec2(0, 
 bool Stepper(s1::Engine &engine, S1Parameter parameter, const char *label,
              float width = 120.0f);
 
+/// One destination row of the LFO modulation matrix.
+struct ModTarget {
+    S1Parameter parameter;
+    const char *label;
+};
+
+/// Modulation matrix for the LFO routing parameters.
+///
+/// Each routing parameter is 0=off, 1=LFO1, 2=LFO2, 3=both -- a bitmask, since
+/// the DSP averages the two into lfo3 for value 3. So rather than twelve
+/// identical 4-way selectors, this draws destinations down the side and one
+/// cell per LFO, which is both smaller and readable at a glance: you can see
+/// what a given LFO drives by scanning its column.
+///
+/// `blocks` splits the rows into that many side-by-side groups.
+bool ModMatrix(s1::Engine &engine, const ModTarget *targets, int count, int blocks = 2);
+
 /// Radio strip for enumerated parameters (LFO waveform, filter type, ...).
 bool Selector(s1::Engine &engine, S1Parameter parameter, const char *label,
               const char *const *options, int count);

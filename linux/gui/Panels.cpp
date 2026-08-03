@@ -29,13 +29,6 @@ constexpr int kArpSeqTempoMultiplierID = 9;
 const char *const kLfoWaveforms[] = {"SIN", "SQR", "SAW", "RSAW"};
 const char *const kFilterTypes[] = {"LP", "BP", "HP"};
 const char *const kArpDirections[] = {"DOWN", "UP", "UP+DN"};
-const char *const kLfoTargets[] = {"OFF", "LFO1", "LFO2", "LFO1+2"};
-
-/// The LFO-assignment toggles are 0..3 selectors on iOS (off / lfo1 / lfo2 /
-/// both), drawn here as a compact 4-way selector.
-void lfoAssign(s1::Engine &engine, S1Parameter parameter, const char *label) {
-    Selector(engine, parameter, label, kLfoTargets, 4);
-}
 
 void beginPanelChild(const char *id, float height) {
     ImGui::PushStyleColor(ImGuiCol_ChildBg, ImColor(color::kPanel).Value);
@@ -228,20 +221,24 @@ static void drawEffects(s1::Engine &engine, UiState &) {
     ImGui::EndGroup();
 
     SectionLabel("LFO ROUTING");
-    ImGui::BeginGroup();
-    lfoAssign(engine, cutoffLFO, "CUTOFF");        ImGui::SameLine(0.0f, 12.0f);
-    lfoAssign(engine, resonanceLFO, "RES");        ImGui::SameLine(0.0f, 12.0f);
-    lfoAssign(engine, oscMixLFO, "OSC MIX");       ImGui::SameLine(0.0f, 12.0f);
-    lfoAssign(engine, reverbMixLFO, "REV MIX");
-    lfoAssign(engine, decayLFO, "DECAY");          ImGui::SameLine(0.0f, 12.0f);
-    lfoAssign(engine, noiseLFO, "NOISE");          ImGui::SameLine(0.0f, 12.0f);
-    lfoAssign(engine, fmLFO, "FM");                ImGui::SameLine(0.0f, 12.0f);
-    lfoAssign(engine, detuneLFO, "DETUNE");
-    lfoAssign(engine, filterEnvLFO, "FILT ENV");   ImGui::SameLine(0.0f, 12.0f);
-    lfoAssign(engine, pitchLFO, "PITCH");          ImGui::SameLine(0.0f, 12.0f);
-    lfoAssign(engine, bitcrushLFO, "BITCRUSH");    ImGui::SameLine(0.0f, 12.0f);
-    lfoAssign(engine, tremoloLFO, "TREMOLO");
-    ImGui::EndGroup();
+    static const ModTarget kLfoTargets2[] = {
+        {cutoffLFO,    "CUTOFF"},
+        {resonanceLFO, "RESONANCE"},
+        {oscMixLFO,    "OSC MIX"},
+        {reverbMixLFO, "REVERB MIX"},
+        {decayLFO,     "DECAY"},
+        {noiseLFO,     "NOISE"},
+        {fmLFO,        "FM"},
+        {detuneLFO,    "DETUNE"},
+        {filterEnvLFO, "FILTER ENV"},
+        {pitchLFO,     "PITCH"},
+        {bitcrushLFO,  "BITCRUSH"},
+        {tremoloLFO,   "TREMOLO"},
+    };
+    // Two side-by-side blocks of six; both LFOs lit on one row is the DSP's
+    // "LFO1+2", which averages them.
+    ModMatrix(engine, kLfoTargets2,
+              static_cast<int>(sizeof(kLfoTargets2) / sizeof(kLfoTargets2[0])), 2);
 
     SectionLabel("REVERB / DELAY");
     ImGui::BeginGroup();
@@ -460,6 +457,14 @@ void DrawHeader(s1::Engine &engine, UiState &ui) {
     }
 
     ImGui::SameLine(0.0f, 10.0f);
+    if (ImGui::Button(ui.sideBySide ? "LAYOUT: SIDE" : "LAYOUT: STACK", ImVec2(130, 0))) {
+        ui.sideBySide = !ui.sideBySide;
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("stacked = panels top/bottom; side = split by a vertical divider");
+    }
+
+    ImGui::SameLine(0.0f, 10.0f);
     ToggleValue(ui.showKeyboard, "KEYBOARD", ImVec2(100, 0));
 
     ImGui::SameLine(0.0f, 10.0f);
@@ -554,8 +559,8 @@ void DrawSaveDialog(s1::Engine &engine, UiState &ui) {
     ImGui::SetNextWindowSize(ImVec2(420, 0));
     if (ImGui::BeginPopupModal("Save Preset", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
         ImGui::TextColored(ImColor(color::kTextDim),
-                           "Writes the current synth state into a bank file under");
-        ImGui::TextColored(ImColor(color::kTextDim), "Presets/Data/.");
+                           "Writes the current synth state to your preset directory:");
+        ImGui::TextWrapped("%s", engine.userDataDir().c_str());
         ImGui::Spacing();
 
         ImGui::SetNextItemWidth(260.0f);
@@ -572,6 +577,12 @@ void DrawSaveDialog(s1::Engine &engine, UiState &ui) {
                 ImGui::TextColored(ImColor(color::kAccent), "overwrites '%s'", p.name.c_str());
                 break;
             }
+        }
+        if (!engine.bankIsWritable(ui.saveBank)) {
+            ImGui::TextColored(ImColor(color::kOn),
+                               "'%s' is a factory bank -- a copy is made in your", ui.saveBank);
+            ImGui::TextColored(ImColor(color::kOn),
+                               "preset directory; the shipped one is left alone.");
         }
 
         ImGui::Spacing();

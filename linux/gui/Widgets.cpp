@@ -273,6 +273,99 @@ bool Stepper(s1::Engine &engine, S1Parameter parameter, const char *label, float
     return changed;
 }
 
+namespace {
+
+/// One matrix cell: a rounded square that fills with `accent` when routed.
+bool modCell(const char *id, bool on, ImU32 accent) {
+    const ImVec2 size(30.0f, 20.0f);
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+
+    ImGui::PushID(id);
+    ImGui::InvisibleButton("cell", size);
+    const bool clicked = ImGui::IsItemClicked(ImGuiMouseButton_Left);
+    const bool hovered = ImGui::IsItemHovered();
+    ImGui::PopID();
+
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    const ImVec2 br(origin.x + size.x, origin.y + size.y);
+
+    if (on) {
+        dl->AddRectFilled(origin, br, accent, 4.0f);
+        // A dark tick so the lit cell reads as "on" and not just coloured.
+        const ImVec2 c((origin.x + br.x) * 0.5f, (origin.y + br.y) * 0.5f);
+        dl->AddLine(ImVec2(c.x - 4, c.y), ImVec2(c.x - 1, c.y + 4), color::kBackground, 2.0f);
+        dl->AddLine(ImVec2(c.x - 1, c.y + 4), ImVec2(c.x + 5, c.y - 4), color::kBackground, 2.0f);
+    } else {
+        dl->AddRectFilled(origin, br, color::kKnobBody, 4.0f);
+        dl->AddRect(origin, br, hovered ? accent : color::kKnobEdge, 4.0f);
+    }
+    return clicked;
+}
+
+} // namespace
+
+bool ModMatrix(s1::Engine &engine, const ModTarget *targets, int count, int blocks) {
+    if (blocks < 1) blocks = 1;
+    const int rows = (count + blocks - 1) / blocks;
+
+    bool changed = false;
+    ImGui::PushID("modmatrix");
+
+    if (ImGui::BeginTable("mm", blocks * 3,
+                          ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_NoSavedSettings)) {
+        // Header: destination column stays blank, then the two LFO columns.
+        ImGui::TableNextRow();
+        for (int b = 0; b < blocks; ++b) {
+            ImGui::TableSetColumnIndex(b * 3);
+            ImGui::TextColored(ImColor(color::kTextDim), "DESTINATION");
+            ImGui::TableSetColumnIndex(b * 3 + 1);
+            ImGui::TextColored(ImColor(color::kOn), "LFO1");
+            ImGui::TableSetColumnIndex(b * 3 + 2);
+            ImGui::TextColored(ImColor(color::kAccent), "LFO2");
+        }
+
+        for (int r = 0; r < rows; ++r) {
+            ImGui::TableNextRow();
+            for (int b = 0; b < blocks; ++b) {
+                const int index = b * rows + r;
+                if (index >= count) continue;
+
+                const ModTarget &target = targets[index];
+                const int value = static_cast<int>(std::lround(engine.getParameter(target.parameter)));
+                const bool lfo1 = (value & 1) != 0;
+                const bool lfo2 = (value & 2) != 0;
+
+                ImGui::PushID(index);
+
+                ImGui::TableSetColumnIndex(b * 3);
+                ImGui::AlignTextToFramePadding();
+                ImGui::TextColored(ImColor(value != 0 ? color::kText : color::kTextDim), "%s",
+                                   target.label);
+
+                ImGui::TableSetColumnIndex(b * 3 + 1);
+                if (modCell("l1", lfo1, color::kOn)) {
+                    engine.setParameter(target.parameter,
+                                        static_cast<float>((value ^ 1) & 3));
+                    changed = true;
+                }
+
+                ImGui::TableSetColumnIndex(b * 3 + 2);
+                if (modCell("l2", lfo2, color::kAccent)) {
+                    engine.setParameter(target.parameter,
+                                        static_cast<float>((value ^ 2) & 3));
+                    changed = true;
+                }
+
+                ImGui::PopID();
+            }
+        }
+        ImGui::EndTable();
+    }
+
+    ImGui::PopID();
+    return changed;
+}
+
 bool Selector(s1::Engine &engine, S1Parameter parameter, const char *label,
               const char *const *options, int count) {
     ImGui::PushID(static_cast<int>(parameter));

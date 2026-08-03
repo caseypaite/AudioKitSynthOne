@@ -129,9 +129,21 @@ public:
 
     // -- presets -----------------------------------------------------------
 
-    /// Load every bank in `<resourceDir>/Presets/Data`. Safe to call once after
-    /// start(); banks are indexed but no preset is applied.
+    /// Where user-created presets are written. Defaults to
+    /// $XDG_DATA_HOME/synthone/presets (or ~/.local/share/synthone/presets).
+    /// The factory banks under <resourceDir>/Presets/Data are never written to.
+    static std::string defaultUserDataDir();
+    void setUserDataDir(const std::string &dir) { mUserDir = dir; }
+    const std::string &userDataDir() const { return mUserDir; }
+
+    /// Loads the read-only factory banks from `<resourceDir>/Presets/Data`, then
+    /// the writable user banks from userDataDir(). A user bank of the same name
+    /// replaces the factory one. Safe to call once after start(); banks are
+    /// indexed but no preset is applied.
     bool loadBanks(std::string &error);
+
+    /// True when the named bank lives in the user directory and can be written.
+    bool bankIsWritable(const std::string &bank) const;
     std::vector<std::string> bankNames() const;
     std::vector<PresetInfo> presetsInBank(const std::string &bank) const;
 
@@ -139,8 +151,9 @@ public:
     bool applyPreset(const std::string &bank, int position, std::string &error);
 
     /// Capture the current DSP state as a preset and write it into `bank`,
-    /// replacing the preset at `position` if one exists. The bank file is
-    /// written to <resourceDir>/Presets/Data/<bank>.json.
+    /// replacing the preset at `position` if one exists. Always writes to
+    /// userDataDir()/<bank>.json -- saving into a factory bank name copies that
+    /// bank into the user directory first, leaving the shipped file untouched.
     bool savePreset(const std::string &bank, int position, const std::string &name,
                     std::string &error);
 
@@ -155,6 +168,11 @@ public:
 private:
     bool loadWavetables(const std::string &resourceDir, std::string &error);
 
+    /// Reads every *.json bank in `dir`. A bank whose name is already loaded is
+    /// replaced, so calling this for the user directory after the factory one
+    /// lets a user bank shadow a shipped one.
+    void loadBanksFrom(const std::string &dir, bool isUser);
+
     std::unique_ptr<S1DSPKernel> mKernel;
     std::unique_ptr<S1AudioUnit> mAudioUnit;
 
@@ -162,6 +180,7 @@ private:
     int    mChannels = 2;
     int    mNotesPerOctave = 12;
     std::string mResourceDir;
+    std::string mUserDir = defaultUserDataDir();
 
     struct Bank {
         std::string name;
@@ -170,6 +189,7 @@ private:
         // to the DSP default for anything absent.
         std::vector<JsonValue> presets;
         std::vector<PresetInfo> info;
+        bool isUser = false; // lives in userDataDir(), so writable
     };
     std::vector<Bank> mBanks;
 

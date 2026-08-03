@@ -76,6 +76,7 @@ public:
 int main(int argc, char **argv) {
     std::string backendName;
     std::string resourceDir = S1_DEFAULT_RESOURCE_DIR;
+    std::string userDir;
     std::string bank;
     std::string midiSpec = "all";
     int presetPosition = 0;
@@ -95,6 +96,7 @@ int main(int argc, char **argv) {
         else if (arg == "--rate") requestedRate = std::stod(next());
         else if (arg == "--buffer") requestedFrames = static_cast<uint32_t>(std::stoul(next()));
         else if (arg == "--resources") resourceDir = next();
+        else if (arg == "--user-dir") userDir = next();
         else if (arg == "--bank") bank = next();
         else if (arg == "--preset") presetPosition = std::stoi(next());
         else if (arg == "--midi") midiSpec = next();
@@ -146,6 +148,7 @@ int main(int argc, char **argv) {
         std::cerr << "error: " << error << "\n";
         return 1;
     }
+    if (!userDir.empty()) engine.setUserDataDir(userDir);
     if (!engine.loadBanks(error)) {
         std::cerr << "warning: " << error << "\n";
     }
