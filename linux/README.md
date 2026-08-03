@@ -42,6 +42,7 @@ Two binaries are produced:
 | binary | purpose |
 | --- | --- |
 | `build/synthone` | standalone realtime host |
+| `build/synthone-gui` | full graphical front end (Dear ImGui + GLFW) |
 | `build/synthone-offline` | renders a preset to a WAV; no audio hardware needed |
 
 ## Run
@@ -178,12 +179,15 @@ DSP→UI notifications go through the message ring, drained by the host.
 
 ## Known gaps
 
-- **No GUI.** The engine is complete; the interface is not ported.
-- **Tunings.** The DSP tuning table works and defaults to 12-ET, but the
-  microtonal preset library (`Tunings/`, Swift + Codable) is not loaded, so
-  presets always play in 12-ET regardless of a stored tuning.
-- **No preset saving.** Banks are read-only here.
+- **The GUI is a rebuild, not a port.** `synthone-gui` covers all six panels
+  and every parameter, but it is drawn with Dear ImGui rather than the original
+  PaintCode vector assets, so it does not look like the iOS app.
+- **Tunings travel with the app, not with presets.** The 117-scale library
+  loads and applies correctly, but a scale stored *inside* a preset
+  (`tuningName` / `tuningMasterSet`) is still ignored on load.
 - **MIDI in only.** No MIDI out, no MPE, no Ableton Link, no Audiobus/IAA.
+- **The ADSR editor is display-only** -- the curve tracks the parameters, but
+  editing is via the knobs beneath it rather than by dragging handles.
 - **Sample rate** is fixed at engine start; changing the JACK rate while
   running is not handled.
 - Presets that differ from the DSP default in mono/poly clear all voices on the

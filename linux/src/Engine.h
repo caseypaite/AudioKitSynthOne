@@ -9,6 +9,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -61,11 +62,70 @@ public:
     float maximum(S1Parameter parameter) const;
     float defaultValue(S1Parameter parameter) const;
 
+    /// Tempo-syncable parameters (lfo1Rate, lfo2Rate, autoPanFrequency,
+    /// delayTime, arpSeqTempoMultiplier) are driven as normalised [0,1] values
+    /// and may be rewritten by the DSP when arp/tempo-sync changes. `payload`
+    /// identifies the originating control so it can ignore its own echo.
+    void  setDependentParameter(S1Parameter parameter, float value01, int payload);
+    float getDependentParameter(S1Parameter parameter) const;
+
+    /// Knob position <-> parameter value, using the same algebraic taper as
+    /// the iOS Knob control (value = min + (max-min) * pos^taper).
+    float positionToValue(S1Parameter parameter, float position, float taper) const;
+    float valueToPosition(S1Parameter parameter, float value, float taper) const;
+
     /// Look a parameter up by its preset key ("cutoff", "morph1Volume", ...).
     /// Returns false if the name is unknown.
     bool parameterNamed(const std::string &name, S1Parameter &out) const;
     std::vector<std::string> parameterNames() const;
     std::string parameterName(S1Parameter parameter) const;
+
+    // -- MIDI learn --------------------------------------------------------
+
+    /// Arm learn for `parameter`; the next CC received binds to it.
+    /// Pass S1ParameterCount to disarm.
+    void  armMidiLearn(S1Parameter parameter);
+    bool  midiLearnArmed() const;
+    S1Parameter midiLearnTarget() const;
+
+    /// -1 when the parameter has no CC bound.
+    int   ccForParameter(S1Parameter parameter) const;
+    void  clearMidiLearn(S1Parameter parameter);
+    void  clearAllMidiLearn();
+
+    /// Taper used when a CC drives a parameter, so learned knobs track the UI.
+    void  setMidiLearnTaper(S1Parameter parameter, float taper);
+
+    // -- tuning ------------------------------------------------------------
+
+    /// The DSP holds a 128-entry midi-note -> frequency table.
+    float tuningTableFrequency(int noteNumber) const;
+    void  setTuningTableFrequency(int noteNumber, float frequency);
+    int   tuningNotesPerOctave() const { return mNotesPerOctave; }
+    void  setTuningNotesPerOctave(int npo);
+
+    /// Rebuild the table as 12-tone equal temperament around the current
+    /// frequencyA4, matching AKPolyphonicNode.tuningTable.defaultTuning().
+    void setTuning12ET();
+
+    /// A scale from the curated microtonal library: a "master set" of ratios
+    /// spanning one octave.
+    struct Tuning {
+        std::string         name;
+        std::vector<double> masterSet;
+    };
+
+    /// Loads linux/data/tunings.json (extracted from the iOS Tunings library).
+    bool loadTunings(const std::string &path, std::string &error);
+    const std::vector<Tuning> &tunings() const { return mTunings; }
+    int  currentTuningIndex() const { return mCurrentTuning; }
+
+    /// Applies a tuning by index, rebuilding all 128 table entries.
+    bool applyTuning(int index);
+
+    /// Applies an arbitrary master set, as AKTuningTable does: octave-reduce
+    /// each ratio into [1,2), sort, then repeat across the keyboard.
+    void applyMasterSet(const std::vector<double> &masterSet, const std::string &name);
 
     // -- presets -----------------------------------------------------------
 
@@ -77,6 +137,12 @@ public:
 
     /// Apply a preset by bank name and position. Returns false if not found.
     bool applyPreset(const std::string &bank, int position, std::string &error);
+
+    /// Capture the current DSP state as a preset and write it into `bank`,
+    /// replacing the preset at `position` if one exists. The bank file is
+    /// written to <resourceDir>/Presets/Data/<bank>.json.
+    bool savePreset(const std::string &bank, int position, const std::string &name,
+                    std::string &error);
 
     /// Deliver queued DSP notifications to the observer. Call periodically from
     /// the control thread; never from the audio thread.
@@ -94,6 +160,7 @@ private:
 
     double mSampleRate = 44100.0;
     int    mChannels = 2;
+    int    mNotesPerOctave = 12;
     std::string mResourceDir;
 
     struct Bank {
@@ -105,6 +172,15 @@ private:
         std::vector<PresetInfo> info;
     };
     std::vector<Bank> mBanks;
+
+    std::vector<Tuning> mTunings;
+    int                 mCurrentTuning = -1;
+
+    // MIDI learn. Touched from the audio thread (CC dispatch) and the UI
+    // thread (arming/clearing), so kept lock-free.
+    std::atomic<int>   mLearnTarget{-1};
+    std::atomic<int>   mCcToParameter[128];
+    float              mLearnTaper[S1Parameter::S1ParameterCount];
 };
 
 } // namespace s1

@@ -1,0 +1,538 @@
+//
+//  Widgets.cpp
+//  AudioKitSynthOne - Linux port
+//
+
+#include "Widgets.h"
+
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
+
+namespace s1gui {
+
+namespace {
+
+constexpr float kTwoPi = 6.28318530718f;
+// Knob sweep: 270 degrees, opening downward like the iOS control.
+constexpr float kStartAngle = 2.35619449f;  // 135 deg
+constexpr float kSweep = 4.71238898f;       // 270 deg
+
+void drawKnobFace(ImDrawList *dl, const ImVec2 &centre, float radius, float position,
+                  bool active, ImU32 accent) {
+    const float a0 = kStartAngle;
+    const float a1 = kStartAngle + kSweep;
+
+    dl->PathArcTo(centre, radius, a0, a1, 48);
+    dl->PathStroke(color::kTrack, 0, 3.0f);
+
+    if (position > 0.0f) {
+        dl->PathArcTo(centre, radius, a0, a0 + kSweep * position, 48);
+        dl->PathStroke(accent, 0, 3.0f);
+    }
+
+    dl->AddCircleFilled(centre, radius - 4.0f, color::kKnobBody, 32);
+    dl->AddCircle(centre, radius - 4.0f, active ? accent : color::kKnobEdge, 32, 1.0f);
+
+    const float angle = a0 + kSweep * position;
+    const ImVec2 tip(centre.x + std::cos(angle) * (radius - 6.0f),
+                     centre.y + std::sin(angle) * (radius - 6.0f));
+    const ImVec2 root(centre.x + std::cos(angle) * (radius * 0.35f),
+                      centre.y + std::sin(angle) * (radius * 0.35f));
+    dl->AddLine(root, tip, active ? accent : color::kText, 2.0f);
+}
+
+/// Shared drag behaviour for the rotary controls. Returns true when `position`
+/// changed; `reset` is set on a double-click.
+bool knobBehaviour(const char *id, const ImVec2 &size, float &position, bool &reset) {
+    ImGui::InvisibleButton(id, size);
+    reset = ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
+
+    bool changed = false;
+    if (ImGui::IsItemActive() && ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
+        const ImGuiIO &io = ImGui::GetIO();
+        // Vertical drag; 200 px covers the full sweep, 4x finer with shift.
+        const float scale = io.KeyShift ? 800.0f : 200.0f;
+        const float delta = -io.MouseDelta.y / scale;
+        if (delta != 0.0f) {
+            position = std::clamp(position + delta, 0.0f, 1.0f);
+            changed = true;
+        }
+    }
+    return changed;
+}
+
+void labelledReadout(const ImVec2 &topLeft, float width, const char *label,
+                     const std::string &readout, bool hovered) {
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    const ImVec2 labelSize = ImGui::CalcTextSize(label);
+    dl->AddText(ImVec2(topLeft.x + (width - labelSize.x) * 0.5f, topLeft.y),
+                color::kTextDim, label);
+
+    if (hovered && !readout.empty()) {
+        const ImVec2 valueSize = ImGui::CalcTextSize(readout.c_str());
+        dl->AddText(ImVec2(topLeft.x + (width - valueSize.x) * 0.5f, topLeft.y + 14.0f),
+                    color::kAccent, readout.c_str());
+    }
+}
+
+bool gLearnMode = false;
+
+} // namespace
+
+void SetLearnMode(bool on) { gLearnMode = on; }
+bool LearnMode() { return gLearnMode; }
+
+std::string FormatValue(float value, Units units) {
+    char buf[64];
+    switch (units) {
+        case Units::Hertz:
+            if (value >= 1000.0f) std::snprintf(buf, sizeof(buf), "%.2f kHz", value / 1000.0f);
+            else                  std::snprintf(buf, sizeof(buf), "%.1f Hz", value);
+            break;
+        case Units::Seconds:
+            if (value < 1.0f) std::snprintf(buf, sizeof(buf), "%.0f ms", value * 1000.0f);
+            else              std::snprintf(buf, sizeof(buf), "%.2f s", value);
+            break;
+        case Units::Percent:   std::snprintf(buf, sizeof(buf), "%.0f%%", value * 100.0f); break;
+        case Units::Semitones: std::snprintf(buf, sizeof(buf), "%+.2f st", value); break;
+        case Units::BPM:       std::snprintf(buf, sizeof(buf), "%.1f BPM", value); break;
+        case Units::Decibels:  std::snprintf(buf, sizeof(buf), "%.1f dB", value); break;
+        case Units::Index:     std::snprintf(buf, sizeof(buf), "%d", static_cast<int>(value)); break;
+        case Units::Raw:
+        default:               std::snprintf(buf, sizeof(buf), "%.3f", value); break;
+    }
+    return buf;
+}
+
+bool Knob(s1::Engine &engine, const KnobSpec &spec, float diameter) {
+    ImGui::PushID(static_cast<int>(spec.parameter));
+
+    const float width = std::max(diameter + 8.0f, 56.0f);
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+
+    ImGui::BeginGroup();
+    ImGui::Dummy(ImVec2(width, 28.0f)); // room for label + readout
+
+    const ImVec2 knobTopLeft = ImGui::GetCursorScreenPos();
+    const float radius = diameter * 0.5f;
+    const ImVec2 centre(knobTopLeft.x + width * 0.5f, knobTopLeft.y + radius);
+
+    const float value = engine.getParameter(spec.parameter);
+    float position = engine.valueToPosition(spec.parameter, value, spec.taper);
+
+    bool reset = false;
+    const bool dragged = knobBehaviour("knob", ImVec2(width, diameter), position, reset);
+    const bool active = ImGui::IsItemActive();
+    const bool hovered = ImGui::IsItemHovered() || active;
+
+    bool changed = false;
+    const int boundCc = gLearnMode ? engine.ccForParameter(spec.parameter) : -1;
+
+    if (gLearnMode) {
+        // In learn mode a click arms the parameter; right-click clears it.
+        if (ImGui::IsItemClicked(ImGuiMouseButton_Left)) {
+            engine.setMidiLearnTaper(spec.parameter, spec.taper);
+            engine.armMidiLearn(spec.parameter);
+        } else if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
+            engine.clearMidiLearn(spec.parameter);
+        }
+    } else if (reset) {
+        engine.setParameter(spec.parameter, engine.defaultValue(spec.parameter));
+        changed = true;
+    } else if (dragged) {
+        engine.setParameter(spec.parameter,
+                            engine.positionToValue(spec.parameter, position, spec.taper));
+        changed = true;
+    }
+
+    const float shown = engine.valueToPosition(
+        spec.parameter, engine.getParameter(spec.parameter), spec.taper);
+    const bool armed = gLearnMode && engine.midiLearnArmed() &&
+                       engine.midiLearnTarget() == spec.parameter;
+    drawKnobFace(ImGui::GetWindowDrawList(), centre, radius, shown, active || armed,
+                 armed ? color::kLED : (boundCc >= 0 ? color::kOn : color::kAccent));
+
+    std::string readout = FormatValue(engine.getParameter(spec.parameter), spec.units);
+    if (gLearnMode) {
+        char buf[32];
+        if (armed)            std::snprintf(buf, sizeof(buf), "learn...");
+        else if (boundCc >= 0) std::snprintf(buf, sizeof(buf), "CC %d", boundCc);
+        else                   std::snprintf(buf, sizeof(buf), "--");
+        readout = buf;
+    }
+    labelledReadout(origin, width, spec.label, readout, hovered || gLearnMode);
+    ImGui::EndGroup();
+    ImGui::PopID();
+    return changed;
+}
+
+bool DependentKnob(s1::Engine &engine, S1Parameter parameter, const char *label, int payload,
+                   const char *readout, float diameter) {
+    ImGui::PushID(static_cast<int>(parameter) + 10000);
+
+    const float width = std::max(diameter + 8.0f, 56.0f);
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+
+    ImGui::BeginGroup();
+    ImGui::Dummy(ImVec2(width, 28.0f));
+
+    const ImVec2 knobTopLeft = ImGui::GetCursorScreenPos();
+    const float radius = diameter * 0.5f;
+    const ImVec2 centre(knobTopLeft.x + width * 0.5f, knobTopLeft.y + radius);
+
+    float position = engine.getDependentParameter(parameter);
+
+    bool reset = false;
+    const bool dragged = knobBehaviour("dep", ImVec2(width, diameter), position, reset);
+    const bool active = ImGui::IsItemActive();
+    const bool hovered = ImGui::IsItemHovered() || active;
+
+    bool changed = false;
+    if (dragged) {
+        engine.setDependentParameter(parameter, position, payload);
+        changed = true;
+    }
+
+    drawKnobFace(ImGui::GetWindowDrawList(), centre, radius,
+                 engine.getDependentParameter(parameter), active, color::kOn);
+    labelledReadout(origin, width, label, readout ? readout : std::string(), hovered);
+    ImGui::EndGroup();
+    ImGui::PopID();
+    return changed;
+}
+
+bool Toggle(s1::Engine &engine, S1Parameter parameter, const char *label, const ImVec2 &size) {
+    const bool on = engine.getParameter(parameter) > 0.5f;
+
+    ImGui::PushStyleColor(ImGuiCol_Button, on ? color::kOnDim : color::kPanel);
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, on ? color::kOn : color::kPanelEdge);
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, color::kOn);
+    ImGui::PushStyleColor(ImGuiCol_Text, on ? color::kText : color::kTextDim);
+
+    ImGui::PushID(static_cast<int>(parameter));
+    const bool clicked = ImGui::Button(label, size);
+    ImGui::PopID();
+    ImGui::PopStyleColor(4);
+
+    if (clicked) {
+        engine.setParameter(parameter, on ? 0.0f : 1.0f);
+    }
+    return clicked;
+}
+
+bool ToggleValue(bool &value, const char *label, const ImVec2 &size) {
+    ImGui::PushStyleColor(ImGuiCol_Button, value ? color::kOnDim : color::kPanel);
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, value ? color::kOn : color::kPanelEdge);
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, color::kOn);
+    ImGui::PushStyleColor(ImGuiCol_Text, value ? color::kText : color::kTextDim);
+    const bool clicked = ImGui::Button(label, size);
+    ImGui::PopStyleColor(4);
+    if (clicked) value = !value;
+    return clicked;
+}
+
+bool Stepper(s1::Engine &engine, S1Parameter parameter, const char *label, float width) {
+    ImGui::PushID(static_cast<int>(parameter));
+    ImGui::BeginGroup();
+
+    ImGui::TextColored(ImColor(color::kTextDim), "%s", label);
+
+    const float lo = engine.minimum(parameter);
+    const float hi = engine.maximum(parameter);
+    float value = engine.getParameter(parameter);
+
+    bool changed = false;
+    const float buttonWidth = 24.0f;
+    if (ImGui::Button("-", ImVec2(buttonWidth, 0))) {
+        value = std::max(lo, value - 1.0f);
+        changed = true;
+    }
+    ImGui::SameLine();
+
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), "%d", static_cast<int>(std::lround(value)));
+    const float textWidth = std::max(28.0f, width - 2.0f * buttonWidth - 16.0f);
+    const ImVec2 textSize = ImGui::CalcTextSize(buf);
+    const ImVec2 cursor = ImGui::GetCursorScreenPos();
+    ImGui::GetWindowDrawList()->AddText(
+        ImVec2(cursor.x + (textWidth - textSize.x) * 0.5f, cursor.y + 3.0f),
+        color::kAccent, buf);
+    ImGui::Dummy(ImVec2(textWidth, ImGui::GetFrameHeight()));
+    ImGui::SameLine();
+
+    if (ImGui::Button("+", ImVec2(buttonWidth, 0))) {
+        value = std::min(hi, value + 1.0f);
+        changed = true;
+    }
+
+    if (changed) engine.setParameter(parameter, value);
+
+    ImGui::EndGroup();
+    ImGui::PopID();
+    return changed;
+}
+
+bool Selector(s1::Engine &engine, S1Parameter parameter, const char *label,
+              const char *const *options, int count) {
+    ImGui::PushID(static_cast<int>(parameter));
+    ImGui::BeginGroup();
+    ImGui::TextColored(ImColor(color::kTextDim), "%s", label);
+
+    const int current = static_cast<int>(std::lround(engine.getParameter(parameter)));
+    bool changed = false;
+
+    for (int i = 0; i < count; ++i) {
+        if (i > 0) ImGui::SameLine(0.0f, 2.0f);
+        const bool selected = (i == current);
+        ImGui::PushStyleColor(ImGuiCol_Button, selected ? color::kOnDim : color::kPanel);
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, selected ? color::kOn : color::kPanelEdge);
+        ImGui::PushStyleColor(ImGuiCol_Text, selected ? color::kText : color::kTextDim);
+        ImGui::PushID(i);
+        if (ImGui::Button(options[i])) {
+            engine.setParameter(parameter, static_cast<float>(i));
+            changed = true;
+        }
+        ImGui::PopID();
+        ImGui::PopStyleColor(3);
+    }
+
+    ImGui::EndGroup();
+    ImGui::PopID();
+    return changed;
+}
+
+bool ADSREditor(s1::Engine &engine, S1Parameter attack, S1Parameter decay, S1Parameter sustain,
+                S1Parameter release, const ImVec2 &size, ImU32 fill) {
+    ImGui::PushID(static_cast<int>(attack) + 20000);
+
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+    ImGui::InvisibleButton("adsr", size);
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+
+    dl->AddRectFilled(origin, ImVec2(origin.x + size.x, origin.y + size.y),
+                      color::kBackground, 4.0f);
+    dl->AddRect(origin, ImVec2(origin.x + size.x, origin.y + size.y),
+                color::kPanelEdge, 4.0f);
+
+    // Normalised segment widths; the sustain plateau gets a fixed share so the
+    // shape stays readable at extreme settings.
+    const float a = engine.valueToPosition(attack, engine.getParameter(attack), 1.0f);
+    const float d = engine.valueToPosition(decay, engine.getParameter(decay), 1.0f);
+    const float r = engine.valueToPosition(release, engine.getParameter(release), 1.0f);
+    const float s = std::clamp(engine.getParameter(sustain), 0.0f, 1.0f);
+
+    const float pad = 6.0f;
+    const float w = size.x - 2.0f * pad;
+    const float h = size.y - 2.0f * pad;
+    const float total = a + d + r + 1.0f;
+    const float ax = w * (a / total);
+    const float dx = w * (d / total);
+    const float sx = w * (1.0f / total);
+    const float rx = w * (r / total);
+
+    const ImVec2 p0(origin.x + pad, origin.y + pad + h);
+    const ImVec2 p1(p0.x + ax, origin.y + pad);
+    const ImVec2 p2(p1.x + dx, origin.y + pad + h * (1.0f - s));
+    const ImVec2 p3(p2.x + sx, p2.y);
+    const ImVec2 p4(p3.x + rx, origin.y + pad + h);
+
+    dl->AddQuadFilled(p0, p1, p2, ImVec2(p2.x, p0.y), (fill & 0x00FFFFFF) | 0x40000000);
+    dl->AddQuadFilled(ImVec2(p2.x, p0.y), p2, p3, ImVec2(p3.x, p0.y),
+                      (fill & 0x00FFFFFF) | 0x40000000);
+    dl->AddTriangleFilled(ImVec2(p3.x, p0.y), p3, p4, (fill & 0x00FFFFFF) | 0x40000000);
+
+    const ImVec2 pts[5] = {p0, p1, p2, p3, p4};
+    dl->AddPolyline(pts, 5, fill, 0, 2.0f);
+    for (const ImVec2 &p : {p1, p2, p3}) dl->AddCircleFilled(p, 3.0f, fill, 12);
+
+    ImGui::PopID();
+    return false; // handles are indicators; the knobs below do the editing
+}
+
+bool TouchPadXY(const char *id, const ImVec2 &size, float &x, float &y, bool latched,
+                const char *xLabel, const char *yLabel) {
+    ImGui::PushID(id);
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+    ImGui::InvisibleButton("pad", size);
+
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    dl->AddRectFilled(origin, ImVec2(origin.x + size.x, origin.y + size.y),
+                      color::kBackground, 4.0f);
+    dl->AddRect(origin, ImVec2(origin.x + size.x, origin.y + size.y), color::kPanelEdge, 4.0f);
+
+    for (int i = 1; i < 4; ++i) {
+        const float fx = origin.x + size.x * (i / 4.0f);
+        const float fy = origin.y + size.y * (i / 4.0f);
+        dl->AddLine(ImVec2(fx, origin.y), ImVec2(fx, origin.y + size.y), color::kPanel);
+        dl->AddLine(ImVec2(origin.x, fy), ImVec2(origin.x + size.x, fy), color::kPanel);
+    }
+
+    bool changed = false;
+    const bool active = ImGui::IsItemActive();
+    if (active) {
+        const ImVec2 mouse = ImGui::GetIO().MousePos;
+        x = std::clamp((mouse.x - origin.x) / size.x, 0.0f, 1.0f);
+        y = std::clamp(1.0f - (mouse.y - origin.y) / size.y, 0.0f, 1.0f);
+        changed = true;
+    }
+
+    if (active || latched) {
+        const ImVec2 dot(origin.x + x * size.x, origin.y + (1.0f - y) * size.y);
+        dl->AddLine(ImVec2(origin.x, dot.y), ImVec2(origin.x + size.x, dot.y), color::kAccentDim);
+        dl->AddLine(ImVec2(dot.x, origin.y), ImVec2(dot.x, origin.y + size.y), color::kAccentDim);
+        dl->AddCircleFilled(dot, 8.0f, color::kAccent, 20);
+        dl->AddCircle(dot, 12.0f, color::kAccent, 20, 1.5f);
+    }
+
+    dl->AddText(ImVec2(origin.x + 6.0f, origin.y + size.y - 16.0f), color::kTextDim, xLabel);
+    dl->AddText(ImVec2(origin.x + 6.0f, origin.y + 4.0f), color::kTextDim, yLabel);
+
+    ImGui::PopID();
+    return changed;
+}
+
+bool SequencerGrid(s1::Engine &engine, int totalSteps, int currentStep) {
+    bool changed = false;
+    const float cellWidth = 44.0f;
+
+    ImGui::BeginGroup();
+    ImGui::TextColored(ImColor(color::kTextDim), "STEP");
+    for (int i = 0; i < 16; ++i) {
+        if (i > 0) ImGui::SameLine(0.0f, 3.0f);
+        ImGui::BeginGroup();
+        ImGui::PushID(i);
+
+        const bool inRange = i < totalSteps;
+        const bool playing = (i == currentStep);
+
+        // Step-position LED
+        const ImVec2 ledPos = ImGui::GetCursorScreenPos();
+        ImGui::Dummy(ImVec2(cellWidth, 10.0f));
+        ImGui::GetWindowDrawList()->AddCircleFilled(
+            ImVec2(ledPos.x + cellWidth * 0.5f, ledPos.y + 5.0f), 4.0f,
+            playing ? color::kLED : (inRange ? color::kTrack : color::kPanel), 12);
+
+        // Transpose for this step
+        const S1Parameter noteParam = static_cast<S1Parameter>(sequencerPattern00 + i);
+        int transpose = static_cast<int>(std::lround(engine.getParameter(noteParam)));
+        ImGui::SetNextItemWidth(cellWidth);
+        if (ImGui::DragInt("##t", &transpose, 0.15f, -12, 12, "%+d")) {
+            engine.setParameter(noteParam, static_cast<float>(transpose));
+            changed = true;
+        }
+
+        // Octave boost
+        const S1Parameter octParam = static_cast<S1Parameter>(sequencerOctBoost00 + i);
+        if (Toggle(engine, octParam, "8va", ImVec2(cellWidth, 0))) changed = true;
+
+        // Note on/off
+        const S1Parameter onParam = static_cast<S1Parameter>(sequencerNoteOn00 + i);
+        if (Toggle(engine, onParam, "on", ImVec2(cellWidth, 0))) changed = true;
+
+        ImGui::PopID();
+        ImGui::EndGroup();
+    }
+    ImGui::EndGroup();
+    return changed;
+}
+
+void Keyboard(const ImVec2 &size, int firstOctave, int octaveCount, const bool *heldNotes,
+              int &noteDown, int &notePrev) {
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+    ImGui::InvisibleButton("keyboard", size);
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+
+    const int whiteCount = octaveCount * 7;
+    const float whiteWidth = size.x / static_cast<float>(whiteCount);
+    const float blackWidth = whiteWidth * 0.62f;
+    const float blackHeight = size.y * 0.62f;
+
+    static const int kWhiteSemitone[7] = {0, 2, 4, 5, 7, 9, 11};
+    static const int kBlackSemitone[5] = {1, 3, 6, 8, 10};
+    static const int kBlackAfterWhite[5] = {0, 1, 3, 4, 5};
+
+    const bool active = ImGui::IsItemActive();
+    const ImVec2 mouse = ImGui::GetIO().MousePos;
+    notePrev = noteDown;
+    noteDown = -1;
+
+    // White keys
+    for (int i = 0; i < whiteCount; ++i) {
+        const int octave = firstOctave + i / 7;
+        const int note = (octave + 1) * 12 + kWhiteSemitone[i % 7];
+        const ImVec2 tl(origin.x + i * whiteWidth, origin.y);
+        const ImVec2 br(tl.x + whiteWidth - 1.0f, origin.y + size.y);
+
+        const bool hit = active && mouse.x >= tl.x && mouse.x < br.x &&
+                         mouse.y >= tl.y && mouse.y <= br.y;
+        const bool lit = (note >= 0 && note < 128 && heldNotes && heldNotes[note]);
+        dl->AddRectFilled(tl, br, lit ? color::kAccent : IM_COL32(232, 232, 236, 255), 2.0f);
+        dl->AddRect(tl, br, IM_COL32(60, 60, 66, 255), 2.0f);
+        if (hit) noteDown = note;
+    }
+
+    // Black keys, drawn over the white ones
+    for (int o = 0; o < octaveCount; ++o) {
+        for (int b = 0; b < 5; ++b) {
+            const int octave = firstOctave + o;
+            const int note = (octave + 1) * 12 + kBlackSemitone[b];
+            const float centre = origin.x + (o * 7 + kBlackAfterWhite[b] + 1) * whiteWidth;
+            const ImVec2 tl(centre - blackWidth * 0.5f, origin.y);
+            const ImVec2 br(centre + blackWidth * 0.5f, origin.y + blackHeight);
+
+            const bool hit = active && mouse.x >= tl.x && mouse.x < br.x &&
+                             mouse.y >= tl.y && mouse.y <= br.y;
+            const bool lit = (note >= 0 && note < 128 && heldNotes && heldNotes[note]);
+            dl->AddRectFilled(tl, br, lit ? color::kAccent : IM_COL32(20, 20, 24, 255), 2.0f);
+            if (hit) noteDown = note; // black wins where they overlap
+        }
+    }
+}
+
+void PitchWheel(const ImVec2 &size, const float *frequencies, int count, const bool *playing) {
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+    ImGui::InvisibleButton("pitchwheel", size);
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+
+    const ImVec2 centre(origin.x + size.x * 0.5f, origin.y + size.y * 0.5f);
+    const float radius = std::min(size.x, size.y) * 0.44f;
+
+    dl->AddCircle(centre, radius, color::kPanelEdge, 64, 1.5f);
+    dl->AddCircleFilled(centre, 3.0f, color::kTextDim, 12);
+
+    if (frequencies == nullptr || count <= 0) return;
+
+    // Middle C sits at twelve o'clock; one rotation is one octave.
+    const float base = frequencies[0];
+    if (base <= 0.0f) return;
+
+    for (int i = 0; i < count; ++i) {
+        const float f = frequencies[i];
+        if (f <= 0.0f) continue;
+        float octaveFraction = std::log2(f / base);
+        octaveFraction -= std::floor(octaveFraction);
+
+        const float angle = -1.57079633f + octaveFraction * kTwoPi;
+        const ImVec2 outer(centre.x + std::cos(angle) * radius,
+                           centre.y + std::sin(angle) * radius);
+        const ImVec2 inner(centre.x + std::cos(angle) * radius * 0.55f,
+                           centre.y + std::sin(angle) * radius * 0.55f);
+
+        const bool lit = playing != nullptr && playing[i];
+        dl->AddLine(inner, outer, lit ? color::kAccent : color::kTrack, lit ? 3.0f : 1.5f);
+        dl->AddCircleFilled(outer, lit ? 5.0f : 3.0f, lit ? color::kAccent : color::kTextDim, 12);
+    }
+}
+
+void SectionLabel(const char *text) {
+    ImGui::Spacing();
+    ImGui::TextColored(ImColor(color::kAccent), "%s", text);
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    dl->AddLine(ImVec2(p.x, p.y), ImVec2(p.x + ImGui::GetContentRegionAvail().x, p.y),
+                color::kPanelEdge);
+    ImGui::Spacing();
+}
+
+} // namespace s1gui

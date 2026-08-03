@@ -67,6 +67,11 @@ void writeWav(const std::string &path, const std::vector<float> &interleaved, in
         "  --hold S          how long to hold the note (default: seconds*0.6)\n"
         "  --rate HZ         sample rate (default: 44100)\n"
         "  --set KEY=VALUE   override a synth parameter after loading the preset\n"
+        "  --tuning N        apply tuning N from the library\n"
+        "  --list-tunings    list the tuning library, then exit\n"
+        "  --save-preset B:P:NAME  save current state to bank B at position P\n"
+        "  --learn PARAM=CC  bind a MIDI CC to a parameter, then drive it\n"
+        "  --cc CC=VALUE     send a MIDI CC (0-127)\n"
         "  --list            list banks and presets, then exit\n"
         "  --list-params     list settable parameter names, then exit\n";
     std::exit(2);
@@ -86,6 +91,11 @@ int main(int argc, char **argv) {
     int sampleRate = 44100;
     bool listOnly = false;
     bool listParams = false;
+    bool listTunings = false;
+    int  tuningIndex = -1;
+    std::string savePresetSpec;
+    std::vector<std::pair<std::string,int>> learnBindings;
+    std::vector<std::pair<int,int>> ccMessages;
     std::vector<std::pair<std::string, float>> overrides;
 
     for (int i = 1; i < argc; ++i) {
@@ -104,6 +114,19 @@ int main(int argc, char **argv) {
         else if (arg == "--rate") sampleRate = std::stoi(next());
         else if (arg == "--list") listOnly = true;
         else if (arg == "--list-params") listParams = true;
+        else if (arg == "--list-tunings") listTunings = true;
+        else if (arg == "--tuning") tuningIndex = std::stoi(next());
+        else if (arg == "--save-preset") savePresetSpec = next();
+        else if (arg == "--learn") {
+            const std::string kv = next(); const size_t eq = kv.find('=');
+            if (eq == std::string::npos) usage();
+            learnBindings.emplace_back(kv.substr(0,eq), std::stoi(kv.substr(eq+1)));
+        }
+        else if (arg == "--cc") {
+            const std::string kv = next(); const size_t eq = kv.find('=');
+            if (eq == std::string::npos) usage();
+            ccMessages.emplace_back(std::stoi(kv.substr(0,eq)), std::stoi(kv.substr(eq+1)));
+        }
         else if (arg == "--set") {
             const std::string kv = next();
             const size_t eq = kv.find('=');
@@ -117,7 +140,7 @@ int main(int argc, char **argv) {
 
     if (notes.empty()) notes.push_back(60);
     if (hold < 0) hold = seconds * 0.6;
-    if (!listOnly && !listParams && outPath.empty()) usage();
+    if (!listOnly && !listParams && !listTunings && outPath.empty()) usage();
 
     s1::Engine engine;
     std::string error;
@@ -127,6 +150,21 @@ int main(int argc, char **argv) {
     }
     if (!engine.loadBanks(error)) {
         std::cerr << "warning: " << error << "\n";
+    }
+
+    {
+        std::string tuningError;
+        if (!engine.loadTunings(S1_TUNINGS_JSON, tuningError)) {
+            std::cerr << "warning: tunings: " << tuningError << "\n";
+        }
+    }
+
+    if (listTunings) {
+        const auto &ts = engine.tunings();
+        for (size_t i = 0; i < ts.size(); ++i) {
+            std::cout << i << ": " << ts[i].name << "  (" << ts[i].masterSet.size() << ")\n";
+        }
+        return 0;
     }
 
     if (listParams) {
@@ -168,6 +206,53 @@ int main(int argc, char **argv) {
             return 1;
         }
         engine.setParameter(parameter, kv.second);
+    }
+
+    if (tuningIndex >= 0) {
+        if (!engine.applyTuning(tuningIndex)) {
+            std::cerr << "error: no tuning " << tuningIndex << "\n";
+            return 1;
+        }
+        std::cout << "tuning " << tuningIndex << ": "
+                  << engine.tunings()[tuningIndex].name
+                  << "  npo=" << engine.tuningNotesPerOctave() << "\n";
+        for (int i = 0; i < std::min(engine.tuningNotesPerOctave(), 12); ++i) {
+            std::cout << "   note " << (60+i) << "  " << engine.tuningTableFrequency(60+i) << " Hz\n";
+        }
+    }
+
+    // MIDI learn: arm the parameter, then bind it with one CC message.
+    for (const auto &b : learnBindings) {
+        S1Parameter parameter;
+        if (!engine.parameterNamed(b.first, parameter)) {
+            std::cerr << "error: unknown parameter '" << b.first << "'\n";
+            return 1;
+        }
+        engine.armMidiLearn(parameter);
+        const uint8_t msg[3] = {0xB0, static_cast<uint8_t>(b.second), 64};
+        engine.handleMidi(msg, 3);
+        std::cout << "learned CC " << b.second << " -> " << b.first
+                  << " (cc now " << engine.ccForParameter(parameter) << ")\n";
+    }
+    for (const auto &cc : ccMessages) {
+        const uint8_t msg[3] = {0xB0, static_cast<uint8_t>(cc.first),
+                                static_cast<uint8_t>(cc.second)};
+        engine.handleMidi(msg, 3);
+    }
+
+    if (!savePresetSpec.empty()) {
+        const size_t c1 = savePresetSpec.find(':');
+        const size_t c2 = savePresetSpec.find(':', c1 + 1);
+        if (c1 == std::string::npos || c2 == std::string::npos) usage();
+        const std::string b = savePresetSpec.substr(0, c1);
+        const int pos = std::stoi(savePresetSpec.substr(c1 + 1, c2 - c1 - 1));
+        const std::string nm = savePresetSpec.substr(c2 + 1);
+        std::string saveError;
+        if (!engine.savePreset(b, pos, nm, saveError)) {
+            std::cerr << "error: " << saveError << "\n";
+            return 1;
+        }
+        std::cout << "saved '" << nm << "' to bank " << b << " at " << pos << "\n";
     }
 
     const uint32_t block = 256;

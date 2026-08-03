@@ -177,7 +177,8 @@ target_link_libraries(synthone_core PUBLIC soundpipe m)
 # Wavetables and preset banks are read from the source tree at runtime; this is
 # the fallback when --resources is not given.
 target_compile_definitions(synthone_core PUBLIC
-    "S1_DEFAULT_RESOURCE_DIR=\"${S1_ROOT}/AudioKitSynthOne\"")
+    "S1_DEFAULT_RESOURCE_DIR=\"${S1_ROOT}/AudioKitSynthOne\""
+    "S1_TUNINGS_JSON=\"${CMAKE_CURRENT_SOURCE_DIR}/data/tunings.json\"")
 
 # Xcode-style prefix header: supplies the standard headers the upstream sources
 # get transitively from libc++/Foundation on Apple platforms.
@@ -205,6 +206,8 @@ target_link_libraries(synthone-offline PRIVATE synthone_core)
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(JACK IMPORTED_TARGET jack)
+pkg_check_modules(GLFW IMPORTED_TARGET glfw3)
+pkg_check_modules(GL IMPORTED_TARGET gl)
 pkg_check_modules(PORTAUDIO IMPORTED_TARGET portaudio-2.0)
 pkg_check_modules(ALSA IMPORTED_TARGET alsa)
 
@@ -240,5 +243,69 @@ else()
         target_link_libraries(synthone PRIVATE PkgConfig::PORTAUDIO)
         target_compile_definitions(synthone PRIVATE S1_HAVE_PORTAUDIO)
         message(STATUS "Host backend: PortAudio")
+    endif()
+
+    # -----------------------------------------------------------------------
+    # synthone-gui: full graphical front end
+    #
+    # Dear ImGui is fetched into the binary dir like Soundpipe; nothing
+    # third-party is written into the source tree.
+    # -----------------------------------------------------------------------
+
+    if(GLFW_FOUND AND GL_FOUND)
+        set(IMGUI_REV "v1.91.5")
+        set(IMGUI_DIR "${CMAKE_BINARY_DIR}/_deps/imgui")
+        set(IMGUI_ROOT "" CACHE PATH "Prebuilt Dear ImGui tree (skips fetching)")
+        if(NOT IMGUI_ROOT STREQUAL "")
+            set(IMGUI_DIR "${IMGUI_ROOT}")
+        endif()
+
+        if(NOT EXISTS "${IMGUI_DIR}/imgui.cpp")
+            message(STATUS "Fetching Dear ImGui into ${IMGUI_DIR}")
+            execute_process(COMMAND ${CMAKE_COMMAND} -E make_directory "${IMGUI_DIR}")
+            execute_process(COMMAND git init -q .
+                COMMAND_ERROR_IS_FATAL ANY WORKING_DIRECTORY "${IMGUI_DIR}")
+            execute_process(
+                COMMAND git fetch --depth 1 -q https://github.com/ocornut/imgui.git ${IMGUI_REV}
+                COMMAND_ERROR_IS_FATAL ANY WORKING_DIRECTORY "${IMGUI_DIR}")
+            execute_process(COMMAND git checkout -q FETCH_HEAD
+                COMMAND_ERROR_IS_FATAL ANY WORKING_DIRECTORY "${IMGUI_DIR}")
+        endif()
+
+        add_library(imgui STATIC
+            "${IMGUI_DIR}/imgui.cpp"
+            "${IMGUI_DIR}/imgui_draw.cpp"
+            "${IMGUI_DIR}/imgui_tables.cpp"
+            "${IMGUI_DIR}/imgui_widgets.cpp"
+            "${IMGUI_DIR}/backends/imgui_impl_glfw.cpp"
+            "${IMGUI_DIR}/backends/imgui_impl_opengl3.cpp"
+        )
+        target_include_directories(imgui PUBLIC "${IMGUI_DIR}" "${IMGUI_DIR}/backends")
+        target_link_libraries(imgui PUBLIC PkgConfig::GLFW PkgConfig::GL)
+
+        add_executable(synthone-gui
+            gui/main.cpp
+            gui/Widgets.cpp
+            gui/Panels.cpp
+            host/AudioBackend.cpp
+            host/AlsaMidi.cpp
+        )
+        if(JACK_FOUND)
+            target_sources(synthone-gui PRIVATE host/JackBackend.cpp)
+            target_compile_definitions(synthone-gui PRIVATE S1_HAVE_JACK)
+            target_link_libraries(synthone-gui PRIVATE PkgConfig::JACK)
+        endif()
+        if(PORTAUDIO_FOUND)
+            target_sources(synthone-gui PRIVATE host/PortAudioBackend.cpp)
+            target_compile_definitions(synthone-gui PRIVATE S1_HAVE_PORTAUDIO)
+            target_link_libraries(synthone-gui PRIVATE PkgConfig::PORTAUDIO)
+        endif()
+        target_include_directories(synthone-gui PRIVATE host gui)
+        target_link_libraries(synthone-gui
+            PRIVATE synthone_core imgui PkgConfig::ALSA Threads::Threads)
+        target_compile_options(synthone-gui PRIVATE -Wall)
+        message(STATUS "GUI: Dear ImGui + GLFW")
+    else()
+        message(WARNING "glfw3/gl not found -- skipping synthone-gui.")
     endif()
 endif()
