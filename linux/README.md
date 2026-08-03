@@ -81,6 +81,30 @@ Rendering without hardware:
 ./build/synthone-offline --note 69 --set arpIsOn=0 --set reverbMix=0 out.wav
 ```
 
+## Install
+
+```sh
+./install.sh                            # ~/.local, adds a menu entry
+sudo ./install.sh --prefix /usr/local    # system-wide
+./uninstall.sh                           # removes it; your presets are kept
+```
+
+Binaries go to `<prefix>/lib/synthone`, runtime data to `<prefix>/share/synthone`,
+and `<prefix>/bin` gets thin wrappers that point the binaries at that data --
+necessary because the compiled-in resource path otherwise refers to this
+checkout.
+
+To hand it to someone else:
+
+```sh
+./package.sh          # -> dist/synthone-linux-<arch>.zip
+```
+
+The archive carries the binaries, their data and both scripts; `install.sh`
+detects the packaged layout, so the recipient does not need the source. It is
+not self-contained though -- alsa-lib, glfw, libGL, jack/pipewire-jack,
+portaudio and libX11 must be present on the target.
+
 ### Where presets live
 
 Factory banks ship read-only in `AudioKitSynthOne/Presets/Data/` and are never

@@ -68,6 +68,7 @@ void writeWav(const std::string &path, const std::vector<float> &interleaved, in
         "  --hold S          how long to hold the note (default: seconds*0.6)\n"
         "  --rate HZ         sample rate (default: 44100)\n"
         "  --set KEY=VALUE   override a synth parameter after loading the preset\n"
+        "  --tunings FILE    tuning library JSON (default: built-in path)\n"
         "  --tuning N        apply tuning N from the library\n"
         "  --list-tunings    list the tuning library, then exit\n"
         "  --save-preset B:P:NAME  save current state to bank B at position P\n"
@@ -83,6 +84,7 @@ void writeWav(const std::string &path, const std::vector<float> &interleaved, in
 int main(int argc, char **argv) {
     std::string resourceDir = S1_DEFAULT_RESOURCE_DIR;
     std::string userDir;
+    std::string tuningsPath = S1_TUNINGS_JSON;
     std::string bank;
     std::string outPath;
     int presetPosition = 0;
@@ -108,6 +110,7 @@ int main(int argc, char **argv) {
         };
         if (arg == "--resources") resourceDir = next();
         else if (arg == "--user-dir") userDir = next();
+        else if (arg == "--tunings") tuningsPath = next();
         else if (arg == "--bank") bank = next();
         else if (arg == "--preset") presetPosition = std::stoi(next());
         else if (arg == "--note") notes.push_back(std::stoi(next()));
@@ -158,7 +161,7 @@ int main(int argc, char **argv) {
 
     {
         std::string tuningError;
-        if (!engine.loadTunings(S1_TUNINGS_JSON, tuningError)) {
+        if (!engine.loadTunings(tuningsPath, tuningError)) {
             std::cerr << "warning: tunings: " << tuningError << "\n";
         }
     }
