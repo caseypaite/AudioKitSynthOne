@@ -95,6 +95,7 @@ void S1DSPKernel::init(int _channels, double _sampleRate) {
     noteStates = std::make_unique<NoteStateArray>();
     monoNote = std::make_unique<S1NoteState>();
 
+#ifdef __OBJC__
     heldNoteNumbers = (NSMutableArray<NSValue*>*)[NSMutableArray array];
     heldNoteNumbersAE = [[AEArray alloc] initWithCustomMapping:^void *(id item) {
         NoteNumber* noteNumber = (NoteNumber*)malloc(sizeof(NoteNumber));
@@ -102,6 +103,12 @@ void S1DSPKernel::init(int _channels, double _sampleRate) {
         [value getValue:noteNumber];
         return noteNumber;
     }];
+#else
+    // Linux port: no boxing, so no custom mapping block is needed.
+    heldNoteNumbers.clear();
+    heldNoteNumbers.reserve(S1_NUM_MIDI_NOTES);
+    heldNoteNumbersAE.removeAllObjects();
+#endif
     sequencer.setSampleRate(_sampleRate);
     sequencer.init();
 

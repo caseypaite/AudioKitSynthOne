@@ -16,7 +16,22 @@
 #import "S1Parameter.h"
 #import "S1SeqNoteNumber.hpp"
 
+#ifdef __OBJC__
 @class AEArray;
+#else
+// Linux port: AEArray is a C++ class rather than an Objective-C one, so it is
+// included outright instead of forward-declared. See linux/compat/AEArray.h.
+#import "AEArray.h"
+#endif
+
+// The held-note list reaches the sequencer as an Objective-C object pointer on
+// Apple platforms and as a C++ reference on Linux; both spell member access
+// with `.`, so the body of process() is identical either way.
+#ifdef __OBJC__
+typedef AEArray * S1HeldNotesRef;
+#else
+typedef AEArray & S1HeldNotesRef;
+#endif
 
 #ifdef __cplusplus
 
@@ -37,7 +52,7 @@ public:
     void setNotesPerOctave(int notes);
 
     int getArpBeatCount();
-    void process(DSPParameters &params, AEArray *heldNoteNumbersAE);
+    void process(DSPParameters &params, S1HeldNotesRef heldNoteNumbersAE);
 
 private:
     double mSampleRate = 0;

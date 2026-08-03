@@ -1,0 +1,203 @@
+# AudioKit Synth One — Linux x86_64 port
+
+A native Linux build of the Synth One **synthesis engine**, plus a standalone
+host with JACK/PortAudio output and ALSA sequencer MIDI input.
+
+The DSP is the real thing: the original `S1DSPKernel`, `S1NoteState`,
+`S1Sequencer`, `S1Arpeggiator`, `S1Rate` and `S1DSPCompressor` sources are
+compiled in place from `../AudioKitSynthOne/DSP`, against a compatibility layer
+that stands in for AudioKit and CoreAudio.
+
+**The iOS UI is not ported.** UIKit, the storyboards, the PaintCode StyleKits,
+and the Audiobus/OneSignal/AppCenter/Disk pods have no Linux equivalent — that
+is a rewrite, not a port. What you get here is the engine and a headless host.
+
+## Requirements
+
+Arch Linux packages:
+
+```sh
+sudo pacman -S --needed clang cmake ninja pkgconf alsa-lib
+sudo pacman -S --needed pipewire-jack   # or: jack2
+sudo pacman -S --needed portaudio       # optional, second backend
+```
+
+Soundpipe is not packaged; it is fetched and built into the CMake binary
+directory automatically. Nothing third-party is written into the source tree.
+
+## Build
+
+```sh
+cd linux
+cmake -S . -B build -G Ninja
+cmake --build build
+```
+
+Offline (no network / air-gapped): build Soundpipe yourself and point CMake at
+it with `-DSOUNDPIPE_ROOT=/path/to/soundpipe` (a tree containing
+`libsoundpipe.a` and `h/soundpipe.h`, built with `make NO_LIBSNDFILE=1`).
+
+Two binaries are produced:
+
+| binary | purpose |
+| --- | --- |
+| `build/synthone` | standalone realtime host |
+| `build/synthone-offline` | renders a preset to a WAV; no audio hardware needed |
+
+## Run
+
+```sh
+# List what is available
+./build/synthone --list-midi
+./build/synthone --list
+./build/synthone --list-params
+
+# Play, driven by a MIDI keyboard
+./build/synthone --backend jack --bank "Starter Bank" --preset 0
+
+# No controller handy? Loop a test note to check the audio path
+./build/synthone --backend portaudio --test-note 60
+```
+
+```
+  [engine]  48000 Hz / 1024 frames / poly 6
+  [audio]   jack  -> Ryzen HD Audio Controller Pro:playback_AUX0, ...
+  [midi]    128:0 <- all sources
+  [preset]  0: Init [Starter Bank]
+  ...playing, Ctrl-C to quit
+  voices  1   held   1   beat   0
+```
+
+`--backend` selects `jack` or `portaudio` at runtime; both are compiled in when
+their libraries are present. JACK dictates its own sample rate and buffer size,
+so `--rate`/`--buffer` apply to PortAudio only. MIDI arrives on an ALSA
+sequencer port (`--midi CLIENT:PORT`, or `all`, the default).
+
+Rendering without hardware:
+
+```sh
+./build/synthone-offline --bank BankA --preset 0 --note 60 --seconds 4 out.wav
+./build/synthone-offline --note 69 --set arpIsOn=0 --set reverbMix=0 out.wav
+```
+
+## How the port works
+
+### Compatibility layer (`compat/`)
+
+The upstream DSP sources are compiled **unmodified** except where noted below.
+They resolve their Apple includes against `compat/`, which is placed ahead of
+the DSP tree on the include path — while `DSP/Audio Unit` and `DSP/TAAE` are
+deliberately left *off* it, so the replacements win.
+
+| upstream dependency | replacement |
+| --- | --- |
+| `AudioKit/AKSoundpipeKernel.hpp` | `compat/AudioKit/AKSoundpipeKernel.hpp` — `AKDSPKernel`/`AKOutputBuffered`/`AKSoundpipeKernel` reduced to what the kernel derives from |
+| `AudioKit/AKInterop.h` | `AK_ENUM` as a fixed-underlying-type enum |
+| CoreAudio types | `compat/AppleTypes.h` — `AUValue`, `AUAudioFrameCount`, `AudioBufferList`, `AUMIDIEvent`, `AudioUnitParameterUnit`, `clamp`, `pow2`, `nil`, `__weak` |
+| `S1AudioUnit.h` (Obj-C) | `compat/S1AudioUnit.h` — identical structs, `@protocol S1Protocol` becomes a C++ observer interface |
+| `AEArray` (TAAE, Obj-C) | `compat/AEArray.h` — lock-free held-note snapshots over a fixed ring of preallocated generations; same macros and accessors |
+| `AEMessageQueue` (TAAE, Obj-C) | `compat/AEMessageQueue.h` — bounded SPSC ring of tagged messages, drained by the host |
+| `sp_port` (AudioKit's Soundpipe fork) | `compat/SoundpipeCompat.h` + `src/s1_port.c` — see below |
+| Foundation/AVFoundation/AudioToolbox umbrellas | empty stubs |
+
+`compat/S1Prefix.h` is force-included into every translation unit, standing in
+for the standard headers Apple's libc++ supplies transitively (`<memory>`,
+`<cfloat>`, …).
+
+### Soundpipe
+
+Stock Soundpipe (PaulBatchelor) provides every module Synth One uses. AudioKit
+maintains a private fork that differs in one relevant place: its `sp_port`
+names the smoothing half-time `htime` and takes it as an `sp_port_init()`
+argument, where stock calls it `smooth` and defaults it.
+
+Rather than patch third-party source, `compat/SoundpipeCompat.h` declares an
+equivalent module (`s1_port`, in `src/s1_port.c` — the same one-pole filter,
+transcribed from stock `modules/port.c`) and macro-redirects the `sp_port_*`
+spellings onto it. Soundpipe itself is compiled separately and keeps its own
+`sp_port` intact.
+
+### Reimplemented, not ported
+
+**`src/oscmorph2d.c`** is the one piece of DSP here that is not upstream code.
+The repository's `DSP/Kernel/oscmorph2d.c` is an earlier one-dimensional
+revision whose signature no longer matches its caller — `S1NoteState` passes a
+band count, a band-frequency table, and sets `->enableBandlimit` /
+`->bandlimitIndexOverride`, none of which that file has. The matching version
+lives in AudioKit's Soundpipe fork, which is not public, so it was
+reconstructed from the call sites and the shipped wavetable bank. The
+interpolation math is carried over verbatim; only band selection is new.
+
+Verified against the shipped tables: table index is `band * 4 + waveform`
+(triangle, square, pwm, sawtooth), band 0 is the naive full-bandwidth waveform,
+and bands 1–12 are bandlimited to fundamentals of 8.18 Hz … 22050 Hz such that
+`f_band × harmonics = 22050`. Selection picks the lowest band whose limit is at
+or above the oscillator frequency. Measured on a 2093 Hz sawtooth, enabling
+bandlimiting drops inharmonic (aliased) energy from a 0.029 ratio to ~1e-7.
+
+### Changes to the shared sources
+
+Four upstream files carry `#ifdef __OBJC__` guards. Every guard keeps the
+original code verbatim on the Apple path, so the iOS build is unaffected:
+
+- `DSP/Kernel/S1DSPKernel.hpp` — `@class` forward declarations; `heldNoteNumbers`
+  becomes `std::vector<NoteNumber>` and `heldNoteNumbersAE` is held by value
+- `DSP/Kernel/S1DSPKernel.mm` — the `NSMutableArray`/`AEArray` construction
+- `DSP/Sequencer/S1Sequencer.hpp` — `@class`, plus an `S1HeldNotesRef` typedef
+  that is `AEArray *` on Apple and `AEArray &` on Linux
+- `DSP/Sequencer/S1Sequencer.mm` — the matching `process()` signature
+
+Three files could not be guarded sensibly because their bodies are Objective-C
+throughout; Linux equivalents are compiled instead, transcribed line by line:
+
+| upstream | Linux replacement |
+| --- | --- |
+| `S1DSPKernel+startStopNotes.mm` | `src/S1DSPKernel+startStopNotes.cpp` |
+| `S1DSPKernel+reset.mm` | `src/S1DSPKernel+reset.cpp` |
+| `S1DSPKernel+didChanges.mm` | `src/S1DSPKernel+didChanges.cpp` |
+
+Everything else under `DSP/` — including the whole render loop in
+`S1DSPKernel+process.mm`, all of `S1NoteState.mm`, and `S1Sequencer.mm` — is
+compiled as-is.
+
+### Host layer
+
+`src/Engine.{h,cpp}` replaces `AKSynthOne.swift` + `Conductor.swift`: it owns
+the kernel, uploads the 52-table wavetable bank, loads the factory preset banks
+from `Presets/Data/*.json`, and exposes parameters by preset key. The
+preset→parameter mapping is transcribed from `PresetDataManager.swift`,
+including the legacy VCO-era key names (`vco1Volume` → `morph1Volume`, …);
+parameters absent from older presets fall back to the DSP default.
+
+MIDI is queued on the ALSA thread and applied at the top of the render
+callback, so note handling and `process()` stay on one thread. Note on/off does
+not allocate — the held-note vector is reserved to 128 entries up front.
+
+Threading follows upstream: the render thread never blocks or allocates, and
+DSP→UI notifications go through the message ring, drained by the host.
+
+## Known gaps
+
+- **No GUI.** The engine is complete; the interface is not ported.
+- **Tunings.** The DSP tuning table works and defaults to 12-ET, but the
+  microtonal preset library (`Tunings/`, Swift + Codable) is not loaded, so
+  presets always play in 12-ET regardless of a stored tuning.
+- **No preset saving.** Banks are read-only here.
+- **MIDI in only.** No MIDI out, no MPE, no Ableton Link, no Audiobus/IAA.
+- **Sample rate** is fixed at engine start; changing the JACK rate while
+  running is not handled.
+- Presets that differ from the DSP default in mono/poly clear all voices on the
+  first render after loading — upstream behaviour, invisible on iOS because the
+  engine runs continuously. Load presets before playing, not between notes.
+
+## Layout
+
+```
+linux/
+  CMakeLists.txt        build; fetches and builds Soundpipe
+  compat/               Apple/AudioKit/TAAE stand-ins
+  src/                  Soundpipe additions, Obj-C file replacements,
+                        JSON reader, engine facade
+  host/                 JACK + PortAudio backends, ALSA MIDI, CLI
+  tools/                synthone-offline
+```

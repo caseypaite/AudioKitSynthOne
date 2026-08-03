@@ -21,8 +21,14 @@
 #import "../Sequencer/S1Sequencer.hpp"
 #import "S1DSPCompressor.hpp"
 
+#ifdef __OBJC__
 @class AEArray;
 @class AEMessageQueue;
+#else
+// Linux port: AEArray is a C++ class rather than an Objective-C one, so it is
+// included outright instead of forward-declared. See linux/compat/AEArray.h.
+#import "AEArray.h"
+#endif
 
 #define S1_FTABLE_SIZE (4096)
 #define S1_NUM_WAVEFORMS (4)
@@ -340,8 +346,16 @@ private:
 
     
     // Array of midi note numbers of NoteState's which have had a noteOn event but not yet a noteOff event.
+#ifdef __OBJC__
     NSMutableArray<NSValue*>* heldNoteNumbers;
     AEArray* heldNoteNumbersAE;
+#else
+    // Linux port: the NSMutableArray of boxed NoteNumbers becomes a plain
+    // vector, and AEArray is held by value (it implicitly decays to AEArray*
+    // for the render-thread accessors).
+    std::vector<NoteNumber> heldNoteNumbers;
+    AEArray heldNoteNumbersAE;
+#endif
 
     // These expressions come from Rate.swift which is used for beat sync
     const float minutesPerSecond = 1.f / 60.f;
