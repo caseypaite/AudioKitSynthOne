@@ -174,7 +174,13 @@ ZIP="$OUTDIR/$NAME.zip"
 rm -f "$ZIP"
 ( cd "$STAGE" && zip -qr "$ZIP" "$NAME" )
 
+# Checksum next to the archive, for release verification.
+if command -v sha256sum >/dev/null 2>&1; then
+    ( cd "$OUTDIR" && sha256sum "$(basename "$ZIP")" > "$(basename "$ZIP").sha256" )
+fi
+
 echo
 echo "Done."
 echo "  $ZIP  ($(du -h "$ZIP" | cut -f1))"
+[ -f "$ZIP.sha256" ] && echo "  $ZIP.sha256"
 echo "  unzip it anywhere and run ./install.sh"

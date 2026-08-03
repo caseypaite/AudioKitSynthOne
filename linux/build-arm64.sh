@@ -70,7 +70,9 @@ docker run --rm --platform linux/arm64 \
         strip --strip-unneeded /out/bin/* || true
 
         echo "--- built:"
-        ls -la /out/bin | awk 'NR>1 {printf "    %-20s %s bytes\n", $NF, $5}'
+        for b in /out/bin/*; do
+            echo "    $(basename "$b")  $(stat -c %s "$b") bytes"
+        done
 
         # Docker runs as root; hand the artifacts back to the invoking user so
         # the build directory stays manageable on the host.

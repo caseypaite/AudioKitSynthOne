@@ -11,6 +11,7 @@
 #include <cstring>
 #include <iomanip>
 #include <iostream>
+#include <memory>
 #include <string>
 #include <thread>
 #include <vector>
@@ -122,29 +123,41 @@ int main(int argc, char **argv) {
     }
 
     // -- audio backend -----------------------------------------------------
+    //
+    // Listing presets or parameters needs no audio hardware, so the backend is
+    // skipped entirely for those -- otherwise `--list` would fail on a machine
+    // with no sound card or no running JACK server.
 
-    const auto backends = s1::availableBackends();
-    if (backends.empty()) {
-        std::cerr << "error: this build has no audio backend compiled in\n";
-        return 1;
-    }
-    if (backendName.empty()) backendName = backends.front();
+    const bool listingOnly = listPresets || listParams;
 
     std::string error;
-    auto backend = s1::makeBackend(backendName, error);
-    if (!backend) {
-        std::cerr << "error: " << error << "\n";
-        return 1;
-    }
-    if (!backend->open(requestedRate, requestedFrames, error)) {
-        std::cerr << "error: " << error << "\n";
-        return 1;
+    std::unique_ptr<s1::AudioBackend> backend;
+    double sampleRate = 44100.0;
+
+    if (!listingOnly) {
+        const auto backends = s1::availableBackends();
+        if (backends.empty()) {
+            std::cerr << "error: this build has no audio backend compiled in\n";
+            return 1;
+        }
+        if (backendName.empty()) backendName = backends.front();
+
+        backend = s1::makeBackend(backendName, error);
+        if (!backend) {
+            std::cerr << "error: " << error << "\n";
+            return 1;
+        }
+        if (!backend->open(requestedRate, requestedFrames, error)) {
+            std::cerr << "error: " << error << "\n";
+            return 1;
+        }
+        sampleRate = backend->sampleRate();
     }
 
     // -- engine ------------------------------------------------------------
 
     s1::Engine engine;
-    if (!engine.start(backend->sampleRate(), 2, resourceDir, error)) {
+    if (!engine.start(sampleRate, 2, resourceDir, error)) {
         std::cerr << "error: " << error << "\n";
         return 1;
     }
