@@ -105,6 +105,30 @@ detects the packaged layout, so the recipient does not need the source. It is
 not self-contained though -- alsa-lib, glfw, libGL, jack/pipewire-jack,
 portaudio and libX11 must be present on the target.
 
+### ARM64 (aarch64)
+
+The sources carry no architecture-specific code -- no intrinsics, no inline
+assembly, no `-march` flags -- so on ARM64 hardware the normal build works
+unchanged:
+
+```sh
+cmake -S . -B build -G Ninja && cmake --build build
+```
+
+Soundpipe's only SSE is in kissfft, behind `USE_SIMD`, which this build does
+not define (and Synth One uses none of the FFT modules).
+
+From an x86_64 workstation you can build aarch64 binaries in an emulated
+container:
+
+```sh
+docker run --privileged --rm tonistiigi/binfmt --install arm64   # once
+./build-arm64.sh --package        # -> dist/synthone-linux-aarch64.zip
+```
+
+Emulated compilation is slow. `package.sh --build-dir DIR --arch NAME` packages
+binaries built elsewhere, e.g. on real hardware.
+
 ### Where presets live
 
 Factory banks ship read-only in `AudioKitSynthOne/Presets/Data/` and are never

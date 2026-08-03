@@ -22,18 +22,24 @@ BUILD="$HERE/build"
 
 APP_ID="synthone"
 ARCH="$(uname -m)"
-NAME="$APP_ID-linux-$ARCH"
 OUTDIR="$HERE/dist"
+BIN_SRC="$BUILD"          # where the binaries come from
+ARCH_OVERRIDE=""          # label the archive as this arch instead of the host's
 BINARIES=(synthone-gui synthone synthone-offline)
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --outdir)   OUTDIR="${2:?--outdir needs a directory}"; shift 2 ;;
+        --build-dir) BIN_SRC="${2:?--build-dir needs a directory}"; shift 2 ;;
+        --arch)      ARCH_OVERRIDE="${2:?--arch needs a name}"; shift 2 ;;
         --outdir=*) OUTDIR="${1#*=}"; shift ;;
         -h|--help)  sed -n '3,15p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
 done
+
+[ -n "$ARCH_OVERRIDE" ] && ARCH="$ARCH_OVERRIDE"
+NAME="$APP_ID-linux-$ARCH"
 
 say() { printf '  %s\n' "$*"; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
@@ -44,13 +50,13 @@ echo "Packaging $NAME"
 
 # -- build ------------------------------------------------------------------
 
-if [ ! -x "$BUILD/synthone-gui" ]; then
+if [ "$BIN_SRC" = "$BUILD" ] && [ ! -x "$BUILD/synthone-gui" ]; then
     say "building first"
     cmake -S "$HERE" -B "$BUILD" -G Ninja >/dev/null
     cmake --build "$BUILD" >/dev/null
 fi
 for b in "${BINARIES[@]}"; do
-    [ -x "$BUILD/$b" ] || die "missing $BUILD/$b"
+    [ -x "$BIN_SRC/$b" ] || die "missing $BIN_SRC/$b"
 done
 
 # -- assemble ---------------------------------------------------------------
@@ -62,10 +68,11 @@ ROOT="$STAGE/$NAME"
 install -d "$ROOT/bin" "$ROOT/share/$APP_ID/DSP" "$ROOT/share/$APP_ID/Presets"
 
 for b in "${BINARIES[@]}"; do
-    install -m 755 "$BUILD/$b" "$ROOT/bin/$b"
+    install -m 755 "$BIN_SRC/$b" "$ROOT/bin/$b"
 done
 # Strip debug info; the binaries carry -g from the Release flags.
-if command -v strip >/dev/null 2>&1; then
+# Host `strip` cannot handle a foreign architecture; skip it when cross-packaging.
+if [ -z "$ARCH_OVERRIDE" ] && command -v strip >/dev/null 2>&1; then
     strip --strip-unneeded "$ROOT"/bin/* 2>/dev/null || true
 fi
 say "binaries"
@@ -114,7 +121,7 @@ synthone and synthone-offline on your PATH.
 Requirements
 ------------
 
-x86_64 Linux with a reasonably current glibc. These shared libraries must be
+@ARCH@ Linux with a reasonably current glibc. These shared libraries must be
 present:
 
     alsa-lib          MIDI input (required)
@@ -126,6 +133,10 @@ present:
 On Arch:
 
     sudo pacman -S --needed alsa-lib glfw pipewire-jack portaudio
+
+On Debian/Ubuntu:
+
+    sudo apt install libasound2 libglfw3 libjack-jackd2-0 libportaudio2
 
 If a backend's library is missing the binary will not start; build from source
 to get a version without it.
@@ -153,6 +164,7 @@ Where things go
 Presets you save go to $XDG_DATA_HOME/synthone/presets, defaulting to
 ~/.local/share/synthone/presets. The factory banks are never modified.
 README
+sed -i "s/@ARCH@/$ARCH/" "$ROOT/README.txt"
 say "readme"
 
 # -- zip --------------------------------------------------------------------
