@@ -50,20 +50,34 @@ no audio hardware at all, handy for testing).
 The GUI is a **rebuild, not a port** — Dear ImGui rather than the original
 PaintCode vector artwork — so it covers all six panels but does not look like
 the iOS app. It lays itself out for the target display: the official Pi 7"
-panel is 800x480, so below 1000x620 the GUI switches to a two-row header, one
-panel at a time, and tighter padding — while keeping knobs and buttons at
-finger size.
+panel is 800x480, and below 1000x620 the GUI switches to a two-row header, one
+panel at a time, a hidden on-screen keyboard, and tighter padding.
 
 ### The six panels at 800x480
 
-Every panel fits the 7" display without scrolling. Controls are grouped into
-blocks that pack left to right and wrap, so a panel fills both dimensions
-instead of leaving a ragged edge on every row.
-
 ![The six panels — MAIN, ENV, PAD, FX, SEQ, TUNE — at 800x480](screenshots/panels.gif)
 
-Captured on a virtual X server at exactly the panel's resolution. The
-individual stills are gitignored; only the slideshow is tracked.
+**Every panel fits the 7" display without scrolling**, which is the constraint
+the whole layout is built around.
+
+Controls are grouped into blocks — a row of knobs, a stack of toggles, a
+stepper — that pack left to right and wrap onto a new shelf when the next one
+will not fit. A panel therefore fills both dimensions instead of leaving the
+same ragged edge on every full-width row, and the packing follows the window:
+the FX panel above takes four shelves at 800x480 and two on a desktop.
+
+Knob faces are then sized per panel against what is left over, from 72px on
+MAIN and ENV down to 32px on FX, which carries thirty-odd controls and is the
+one panel with nothing to spare. Padding and spacing give up pixels; buttons
+and scrollbars get *larger*, on the principle that a control you cannot hit
+with a fingertip is worse than one you have to scroll to.
+
+[`linux/README.md`](linux/README.md#blocks-not-rows) has the details, including
+the per-panel sizes and why each is what it is.
+
+Captured with [`linux/tools/screenshots.sh`](linux/tools/screenshots.sh) on a
+virtual X server at exactly the panel's resolution. The individual stills are
+gitignored; only the slideshow is tracked.
 
 ### Booting into it
 
