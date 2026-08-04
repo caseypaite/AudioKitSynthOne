@@ -139,11 +139,13 @@ bool ADSREditor(s1::Engine &engine, S1Parameter attack, S1Parameter decay,
 bool TouchPadXY(const char *id, const ImVec2 &size, float &x, float &y,
                 bool latched, const char *xLabel, const char *yLabel);
 
-/// 16-step sequencer grid: per-step transpose, octave boost and note-on.
-/// `currentStep` highlights the playing step; -1 for none. `rowHeight` sets the
-/// height of each of the three cell rows; 0 uses the frame height.
+/// 16-step sequencer grid, laid out as the iOS panel is: a vertical transpose
+/// slider per step (SequencerPanelController binds a VerticalSlider to each
+/// sequencerPatternNN), with the octave-boost and note-on buttons underneath.
+/// `currentStep` highlights the playing step; -1 for none. `size` is the whole
+/// grid; either axis at 0 falls back to natural sizing.
 bool SequencerGrid(s1::Engine &engine, int totalSteps, int currentStep,
-                   float rowHeight = 0.0f);
+                   const ImVec2 &size = ImVec2(0, 0));
 
 /// Playable keyboard. Returns the note under the pointer while held, else -1.
 /// `heldNotes` marks keys lit by MIDI or the sequencer.

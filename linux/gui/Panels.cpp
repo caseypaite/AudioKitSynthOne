@@ -50,9 +50,9 @@ float kw(const char *label, float diameter = 46.0f) {
 }
 
 // Total width of a row of knobs placed with SameLine(), captions included.
-float kwRow(std::initializer_list<const char *> labels) {
+float kwRow(std::initializer_list<const char *> labels, float diameter = 46.0f) {
     float w = 0.0f;
-    for (const char *l : labels) w += kw(l);
+    for (const char *l : labels) w += kw(l, diameter);
     if (labels.size() > 1) w += ImGui::GetStyle().ItemSpacing.x * (labels.size() - 1);
     return w;
 }
@@ -85,7 +85,11 @@ float blockTitleH() { return ImGui::GetTextLineHeightWithSpacing(); }
 
 class BlockFlow {
 public:
-    BlockFlow() : mAvail(ImGui::GetContentRegionAvail().x), mRowW(0.0f) {}
+    /// Packs into the full width by default. Pass a width to build a column:
+    /// blocks then wrap inside it, which is how SEQ stacks its controls beside
+    /// the step grid.
+    explicit BlockFlow(float avail = 0.0f)
+        : mAvail(avail > 0.0f ? avail : ImGui::GetContentRegionAvail().x), mRowW(0.0f) {}
 
     /// Open a block whose *content* area is contentW x contentH. Wraps to the
     /// next shelf first if this block will not fit on the current one.
@@ -124,8 +128,8 @@ private:
 };
 
 /// Height of a block holding `rows` rows of knobs.
-float knobBlockH(int rows = 1) {
-    return rows * KnobCellHeight() + (rows - 1) * ImGui::GetStyle().ItemSpacing.y;
+float knobBlockH(int rows = 1, float diameter = 46.0f) {
+    return rows * KnobCellHeight(diameter) + (rows - 1) * ImGui::GetStyle().ItemSpacing.y;
 }
 
 /// Height of a block holding `rows` stacked frame-height widgets (buttons).
@@ -142,8 +146,8 @@ float stepperBlockH() {
 /// One grid row: tall enough for whichever of a knob, a two-button stack or a
 /// stepper is biggest, so tiles on a shelf line up instead of stepping up and
 /// down by a few pixels each.
-float blockRowH(int rows = 1) {
-    const float one = std::max({KnobCellHeight(), buttonBlockH(2), stepperBlockH()});
+float blockRowH(int rows = 1, float diameter = 46.0f) {
+    const float one = std::max({KnobCellHeight(diameter), buttonBlockH(2), stepperBlockH()});
     return rows * one + (rows - 1) * (ImGui::GetStyle().ItemSpacing.y + blockTitleH());
 }
 
@@ -176,55 +180,59 @@ static void drawGenerators(s1::Engine &engine, UiState &) {
     // faces spend both: wider blocks pack the shelves fuller, taller cells use
     // the space under them.
     KnobFloor bigKnobs(72.0f);
+    // A desktop pane has room for more than the 46px default too; compact's
+    // floor above still wins there. Measured and drawn at the same size.
+    constexpr float kK = 60.0f;
+    const float rowH = blockRowH(1, kK);
 
     BlockFlow flow;
 
-    flow.begin("OSC 1", kwRow({"MORPH 1", "SEMI 1", "VOL 1"}), blockRowH());
-    Knob(engine, {index1,               "MORPH 1", 1.0f, Units::Raw});       ImGui::SameLine();
-    Knob(engine, {morph1SemitoneOffset, "SEMI 1",  1.0f, Units::Semitones}); ImGui::SameLine();
-    Knob(engine, {morph1Volume,         "VOL 1",   1.0f, Units::Percent});
+    flow.begin("OSC 1", kwRow({"MORPH 1", "SEMI 1", "VOL 1"}, kK), rowH);
+    Knob(engine, {index1,               "MORPH 1", 1.0f, Units::Raw}, kK);       ImGui::SameLine();
+    Knob(engine, {morph1SemitoneOffset, "SEMI 1",  1.0f, Units::Semitones}, kK); ImGui::SameLine();
+    Knob(engine, {morph1Volume,         "VOL 1",   1.0f, Units::Percent}, kK);
     flow.end();
 
-    flow.begin("OSC 2", kwRow({"MORPH 2", "SEMI 2", "DETUNE", "VOL 2"}), blockRowH());
-    Knob(engine, {index2,               "MORPH 2", 1.0f, Units::Raw});       ImGui::SameLine();
-    Knob(engine, {morph2SemitoneOffset, "SEMI 2",  1.0f, Units::Semitones}); ImGui::SameLine();
-    Knob(engine, {morph2Detuning,       "DETUNE",  1.0f, Units::Raw});       ImGui::SameLine();
-    Knob(engine, {morph2Volume,         "VOL 2",   1.0f, Units::Percent});
+    flow.begin("OSC 2", kwRow({"MORPH 2", "SEMI 2", "DETUNE", "VOL 2"}, kK), rowH);
+    Knob(engine, {index2,               "MORPH 2", 1.0f, Units::Raw}, kK);       ImGui::SameLine();
+    Knob(engine, {morph2SemitoneOffset, "SEMI 2",  1.0f, Units::Semitones}, kK); ImGui::SameLine();
+    Knob(engine, {morph2Detuning,       "DETUNE",  1.0f, Units::Raw}, kK);       ImGui::SameLine();
+    Knob(engine, {morph2Volume,         "VOL 2",   1.0f, Units::Percent}, kK);
     flow.end();
 
-    flow.begin("MIX", kw("MIX 1<>2"), blockRowH());
-    Knob(engine, {morphBalance, "MIX 1<>2", 1.0f, Units::Percent});
+    flow.begin("MIX", kw("MIX 1<>2", kK), rowH);
+    Knob(engine, {morphBalance, "MIX 1<>2", 1.0f, Units::Percent}, kK);
     flow.end();
 
-    flow.begin("SUB", kw("SUB") + kBlockGap + 52.0f, blockRowH());
-    Knob(engine, {subVolume, "SUB", 1.0f, Units::Percent}); ImGui::SameLine(0.0f, kBlockGap);
+    flow.begin("SUB", kw("SUB", kK) + kBlockGap + 52.0f, rowH);
+    Knob(engine, {subVolume, "SUB", 1.0f, Units::Percent}, kK); ImGui::SameLine(0.0f, kBlockGap);
     ImGui::BeginGroup();
     Toggle(engine, subOctaveDown, "-24", ImVec2(52, 0));
     Toggle(engine, subIsSquare,   "SQR", ImVec2(52, 0));
     ImGui::EndGroup();
     flow.end();
 
-    flow.begin("FM", kwRow({"FM MIX", "FM MOD"}), blockRowH());
-    Knob(engine, {fmVolume, "FM MIX", 1.0f, Units::Percent}); ImGui::SameLine();
-    Knob(engine, {fmAmount, "FM MOD", 1.0f, Units::Raw});
+    flow.begin("FM", kwRow({"FM MIX", "FM MOD"}, kK), rowH);
+    Knob(engine, {fmVolume, "FM MIX", 1.0f, Units::Percent}, kK); ImGui::SameLine();
+    Knob(engine, {fmAmount, "FM MOD", 1.0f, Units::Raw}, kK);
     flow.end();
 
-    flow.begin("NOISE", kw("NOISE"), blockRowH());
-    Knob(engine, {noiseVolume, "NOISE", 1.0f, Units::Percent});
+    flow.begin("NOISE", kw("NOISE", kK), rowH);
+    Knob(engine, {noiseVolume, "NOISE", 1.0f, Units::Percent}, kK);
     flow.end();
 
-    flow.begin("FILTER", kwRow({"CUTOFF", "RES"}) + kBlockGap + 90.0f, blockRowH());
-    Knob(engine, {cutoff,    "CUTOFF", 2.0f, Units::Hertz});  ImGui::SameLine();
-    Knob(engine, {resonance, "RES",    1.0f, Units::Percent}); ImGui::SameLine(0.0f, kBlockGap);
+    flow.begin("FILTER", kwRow({"CUTOFF", "RES"}, kK) + kBlockGap + 90.0f, rowH);
+    Knob(engine, {cutoff,    "CUTOFF", 2.0f, Units::Hertz}, kK);  ImGui::SameLine();
+    Knob(engine, {resonance, "RES",    1.0f, Units::Percent}, kK); ImGui::SameLine(0.0f, kBlockGap);
     ImGui::BeginGroup();
     ImGui::Dummy(ImVec2(1, 16));
     Selector(engine, filterType, "TYPE", kFilterTypes, 3);
     ImGui::EndGroup();
     flow.end();
 
-    flow.begin("MASTER", kwRow({"VOLUME", "GLIDE"}), blockRowH());
-    Knob(engine, {masterVolume, "VOLUME", 2.0f, Units::Percent}); ImGui::SameLine();
-    Knob(engine, {glide,        "GLIDE",  2.0f, Units::Seconds});
+    flow.begin("MASTER", kwRow({"VOLUME", "GLIDE"}, kK), rowH);
+    Knob(engine, {masterVolume, "VOLUME", 2.0f, Units::Percent}, kK); ImGui::SameLine();
+    Knob(engine, {glide,        "GLIDE",  2.0f, Units::Seconds}, kK);
     flow.end();
 
     // The last shelf holds only three blocks and had about 290px going spare.
@@ -232,7 +240,7 @@ static void drawGenerators(s1::Engine &engine, UiState &) {
     // the tempo stepper are the widgets you poke rather than twist, and they
     // were the smallest things on the panel.
     const float voiceW = 96.0f;
-    flow.begin("VOICE", voiceW * 2.0f + kBlockGap, blockRowH());
+    flow.begin("VOICE", voiceW * 2.0f + kBlockGap, rowH);
     ImGui::BeginGroup();
     Toggle(engine, isMono,       "MONO",   ImVec2(voiceW, 0));
     Toggle(engine, monoIsLegato, "LEGATO", ImVec2(voiceW, 0));
@@ -243,7 +251,7 @@ static void drawGenerators(s1::Engine &engine, UiState &) {
     ImGui::EndGroup();
     flow.end();
 
-    flow.begin("TEMPO (BPM)", 240.0f, blockRowH());
+    flow.begin("TEMPO (BPM)", 240.0f, rowH);
     Stepper(engine, arpRate, "", 240.0f);
     flow.end();
 }
@@ -376,26 +384,33 @@ static void drawEffects(s1::Engine &engine, UiState &ui) {
     // shelves and clears the fold by about 10px; measured, even a 36px face
     // costs 12px across its three knob shelves and brings the scrollbar back.
     // This is the panel the compact sizing exists for.
+    //
+    // A desktop pane is a different story -- FX packs into two shelves there
+    // and has height going spare -- so the requested size is larger and the
+    // compact scaling takes it back down to 32px on the Pi.
+    constexpr float kK = 60.0f;
+    const float rowH = knobBlockH(1, kK);
+
     BlockFlow flow;
 
     // Selector width: four waveform buttons plus their caption line.
     const float selW = 150.0f;
 
-    flow.begin("LFO 1", selW + kBlockGap + kwRow({"RATE", "AMT"}), knobBlockH());
+    flow.begin("LFO 1", selW + kBlockGap + kwRow({"RATE", "AMT"}, kK), rowH);
     Selector(engine, lfo1Index, "WAVE", kLfoWaveforms, 4); ImGui::SameLine(0.0f, kBlockGap);
-    DependentKnob(engine, lfo1Rate, "RATE", kLfo1RateEffectsPanelID, nullptr);
+    DependentKnob(engine, lfo1Rate, "RATE", kLfo1RateEffectsPanelID, nullptr, kK);
     ImGui::SameLine();
-    Knob(engine, {lfo1Amplitude, "AMT", 1.0f, Units::Percent});
+    Knob(engine, {lfo1Amplitude, "AMT", 1.0f, Units::Percent}, kK);
     flow.end();
 
-    flow.begin("LFO 2", selW + kBlockGap + kwRow({"RATE", "AMT"}), knobBlockH());
+    flow.begin("LFO 2", selW + kBlockGap + kwRow({"RATE", "AMT"}, kK), rowH);
     Selector(engine, lfo2Index, "WAVE", kLfoWaveforms, 4); ImGui::SameLine(0.0f, kBlockGap);
-    DependentKnob(engine, lfo2Rate, "RATE", kLfo2RateEffectsPanelID, nullptr);
+    DependentKnob(engine, lfo2Rate, "RATE", kLfo2RateEffectsPanelID, nullptr, kK);
     ImGui::SameLine();
-    Knob(engine, {lfo2Amplitude, "AMT", 1.0f, Units::Percent});
+    Knob(engine, {lfo2Amplitude, "AMT", 1.0f, Units::Percent}, kK);
     flow.end();
 
-    flow.begin("SYNC", 92.0f, knobBlockH());
+    flow.begin("SYNC", 92.0f, rowH);
     Toggle(engine, tempoSyncToArpRate, "TEMPO", ImVec2(92, 0));
     flow.end();
 
@@ -423,34 +438,34 @@ static void drawEffects(s1::Engine &engine, UiState &ui) {
               static_cast<int>(sizeof(kLfoTargets2) / sizeof(kLfoTargets2[0])), 4);
     flow.end();
 
-    flow.begin("REVERB", 80.0f + kBlockGap + kwRow({"SIZE", "LOW CUT", "MIX"}), knobBlockH());
+    flow.begin("REVERB", 80.0f + kBlockGap + kwRow({"SIZE", "LOW CUT", "MIX"}, kK), rowH);
     Toggle(engine, reverbOn, "ON", ImVec2(80, 0)); ImGui::SameLine(0.0f, kBlockGap);
-    Knob(engine, {reverbFeedback, "SIZE",    1.0f, Units::Percent}); ImGui::SameLine();
-    Knob(engine, {reverbHighPass, "LOW CUT", 1.0f, Units::Hertz});   ImGui::SameLine();
-    Knob(engine, {reverbMix,      "MIX",     1.0f, Units::Percent});
+    Knob(engine, {reverbFeedback, "SIZE",    1.0f, Units::Percent}, kK); ImGui::SameLine();
+    Knob(engine, {reverbHighPass, "LOW CUT", 1.0f, Units::Hertz}, kK);   ImGui::SameLine();
+    Knob(engine, {reverbMix,      "MIX",     1.0f, Units::Percent}, kK);
     flow.end();
 
-    flow.begin("DELAY", 80.0f + kBlockGap + kwRow({"TIME", "FEEDBACK", "MIX"}), knobBlockH());
+    flow.begin("DELAY", 80.0f + kBlockGap + kwRow({"TIME", "FEEDBACK", "MIX"}, kK), rowH);
     Toggle(engine, delayOn, "ON", ImVec2(80, 0)); ImGui::SameLine(0.0f, kBlockGap);
-    DependentKnob(engine, delayTime, "TIME", kDelayTimeEffectsPanelID, nullptr); ImGui::SameLine();
-    Knob(engine, {delayFeedback, "FEEDBACK", 1.0f, Units::Percent}); ImGui::SameLine();
-    Knob(engine, {delayMix,      "MIX",      1.0f, Units::Percent});
+    DependentKnob(engine, delayTime, "TIME", kDelayTimeEffectsPanelID, nullptr, kK); ImGui::SameLine();
+    Knob(engine, {delayFeedback, "FEEDBACK", 1.0f, Units::Percent}, kK); ImGui::SameLine();
+    Knob(engine, {delayMix,      "MIX",      1.0f, Units::Percent}, kK);
     flow.end();
 
-    flow.begin("PHASER", kwRow({"PHASE MIX", "RATE", "FEEDBACK", "NOTCH"}), knobBlockH());
-    Knob(engine, {phaserMix,       "PHASE MIX", 1.0f, Units::Percent}); ImGui::SameLine();
-    Knob(engine, {phaserRate,      "RATE",      2.0f, Units::Hertz});   ImGui::SameLine();
-    Knob(engine, {phaserFeedback,  "FEEDBACK",  1.0f, Units::Percent}); ImGui::SameLine();
-    Knob(engine, {phaserNotchWidth,"NOTCH",     1.0f, Units::Hertz});
+    flow.begin("PHASER", kwRow({"PHASE MIX", "RATE", "FEEDBACK", "NOTCH"}, kK), rowH);
+    Knob(engine, {phaserMix,       "PHASE MIX", 1.0f, Units::Percent}, kK); ImGui::SameLine();
+    Knob(engine, {phaserRate,      "RATE",      2.0f, Units::Hertz}, kK);   ImGui::SameLine();
+    Knob(engine, {phaserFeedback,  "FEEDBACK",  1.0f, Units::Percent}, kK); ImGui::SameLine();
+    Knob(engine, {phaserNotchWidth,"NOTCH",     1.0f, Units::Hertz}, kK);
     flow.end();
 
-    flow.begin("AUTOPAN", kwRow({"PAN AMT", "PAN RATE"}), knobBlockH());
-    Knob(engine, {autoPanAmount, "PAN AMT", 1.0f, Units::Percent}); ImGui::SameLine();
-    DependentKnob(engine, autoPanFrequency, "PAN RATE", kAutoPanEffectsPanelID, nullptr);
+    flow.begin("AUTOPAN", kwRow({"PAN AMT", "PAN RATE"}, kK), rowH);
+    Knob(engine, {autoPanAmount, "PAN AMT", 1.0f, Units::Percent}, kK); ImGui::SameLine();
+    DependentKnob(engine, autoPanFrequency, "PAN RATE", kAutoPanEffectsPanelID, nullptr, kK);
     flow.end();
 
-    flow.begin("BITCRUSH", kw("RATE"), knobBlockH());
-    Knob(engine, {bitCrushSampleRate, "RATE", 4.6f, Units::Hertz});
+    flow.begin("BITCRUSH", kw("RATE", kK), rowH);
+    Knob(engine, {bitCrushSampleRate, "RATE", 4.6f, Units::Hertz}, kK);
     flow.end();
 }
 
@@ -463,50 +478,85 @@ static void drawSequencer(s1::Engine &engine, UiState &ui) {
     // rather than by the face, so the face can grow a long way before the
     // block gets any wider and the arp row wraps off its single shelf.
     KnobFloor bigKnobs(52.0f);
+    // A desktop pane has room for a larger face; compact's floor above wins.
+    constexpr float kSeqKnob = 60.0f;
 
-    BlockFlow flow;
+    const ImVec2 avail = ImGui::GetContentRegionAvail();
+    const ImGuiStyle &st = ImGui::GetStyle();
 
-    flow.begin("ARP", 90.0f, blockRowH());
-    ImGui::BeginGroup();
-    Toggle(engine, arpIsOn,        "ARP ON",    ImVec2(90, 0));
-    Toggle(engine, arpIsSequencer, "SEQUENCER", ImVec2(90, 0));
-    ImGui::EndGroup();
-    flow.end();
+    // Every control block, so the two arrangements below share one definition.
+    auto controlBlocks = [&](BlockFlow &flow) {
+        flow.begin("ARP", 90.0f, buttonBlockH(2));
+        ImGui::BeginGroup();
+        Toggle(engine, arpIsOn,        "ARP ON",    ImVec2(90, 0));
+        Toggle(engine, arpIsSequencer, "SEQUENCER", ImVec2(90, 0));
+        ImGui::EndGroup();
+        flow.end();
 
-    flow.begin("DIRECTION", 150.0f, blockRowH());
-    Selector(engine, arpDirection, "", kArpDirections, 3);
-    flow.end();
+        // Selector emits its own caption line above the buttons, even an empty
+        // one, so it needs the same height a Stepper does -- one button row is
+        // half a block and clips them away.
+        flow.begin("DIRECTION", 150.0f, stepperBlockH());
+        Selector(engine, arpDirection, "", kArpDirections, 3);
+        flow.end();
 
-    flow.begin("RATE", kwRow({"INTERVAL", "TEMPO x"}), blockRowH());
-    Knob(engine, {arpInterval, "INTERVAL", 1.0f, Units::Index}); ImGui::SameLine();
-    DependentKnob(engine, arpSeqTempoMultiplier, "TEMPO x", kArpSeqTempoMultiplierID, nullptr);
-    flow.end();
+        flow.begin("RATE", kw("INTERVAL", kSeqKnob) + st.ItemSpacing.x + kw("TEMPO x", kSeqKnob),
+                   KnobCellHeight(kSeqKnob));
+        Knob(engine, {arpInterval, "INTERVAL", 1.0f, Units::Index}, kSeqKnob); ImGui::SameLine();
+        DependentKnob(engine, arpSeqTempoMultiplier, "TEMPO x", kArpSeqTempoMultiplierID,
+                      nullptr, kSeqKnob);
+        flow.end();
 
-    flow.begin("OCTAVES", 96.0f, blockRowH());
-    Stepper(engine, arpOctave, "", 96.0f);
-    flow.end();
+        flow.begin("OCTAVES", 96.0f, stepperBlockH());
+        Stepper(engine, arpOctave, "", 96.0f);
+        flow.end();
 
-    flow.begin("STEPS", 96.0f, blockRowH());
-    Stepper(engine, arpTotalSteps, "", 96.0f);
-    flow.end();
+        flow.begin("STEPS", 96.0f, stepperBlockH());
+        Stepper(engine, arpTotalSteps, "", 96.0f);
+        flow.end();
 
-    flow.begin("TEMPO (BPM)", 120.0f, blockRowH());
-    Stepper(engine, arpRate, "", 120.0f);
-    flow.end();
+        flow.begin("TEMPO (BPM)", 120.0f, stepperBlockH());
+        Stepper(engine, arpRate, "", 120.0f);
+        flow.end();
+    };
 
-    // The grid is 16 steps wide whatever else happens, so it gets its own
-    // shelf and the width of the panel.
-    const float gridW = ImGui::GetContentRegionAvail().x - kBlockPadX * 2.0f - 2.0f;
-    // The arp controls take one shelf, so the grid gets everything below it.
-    // Spend that on taller cells rather than leaving it blank.
-    const float rowH = ui.compact ? 52.0f : 0.0f;
-    const float cellRow = (rowH > 0.0f ? rowH : ImGui::GetFrameHeight()) +
-                          ImGui::GetStyle().ItemSpacing.y;
-    // "STEP" caption, the beat-dot strip, then the transpose / 8va / on rows.
-    const float gridH = ImGui::GetTextLineHeightWithSpacing() + 13.0f + 3.0f * cellRow;
-    flow.begin("16-STEP SEQUENCER", gridW, gridH);
     const int totalSteps = static_cast<int>(std::lround(engine.getParameter(arpTotalSteps)));
-    SequencerGrid(engine, totalSteps, ui.arpBeat, rowH);
+
+    if (!ui.compact) {
+        // Desktop: controls stacked in a column on the left, the step grid
+        // taking the rest of the pane on the right. The grid is the thing worth
+        // the space -- sixteen sliders and thirty-two buttons -- so the column
+        // is only as wide as its widest pair.
+        const float columnW = 280.0f;
+
+        ImGui::BeginGroup();
+        BlockFlow left(columnW);
+        controlBlocks(left);
+        ImGui::EndGroup();
+
+        ImGui::SameLine(0.0f, kBlockGap);
+
+        ImGui::BeginGroup();
+        const float gridW = ImGui::GetContentRegionAvail().x - kBlockPadX * 2.0f - 2.0f;
+        const float gridH = avail.y - blockTitleH() - kBlockPadY * 2.0f - 2.0f;
+        BlockFlow right(ImGui::GetContentRegionAvail().x);
+        right.begin("16-STEP SEQUENCER", gridW, gridH);
+        SequencerGrid(engine, totalSteps, ui.arpBeat, ImVec2(gridW, gridH));
+        right.end();
+        ImGui::EndGroup();
+        return;
+    }
+
+    // Compact: the controls take one shelf and the grid the one below, because
+    // sixteen steps need most of an 800px panel on their own.
+    BlockFlow flow;
+    controlBlocks(flow);
+
+    const float gridW = ImGui::GetContentRegionAvail().x - kBlockPadX * 2.0f - 2.0f;
+    const float gridH = ImGui::GetContentRegionAvail().y - blockTitleH() -
+                        kBlockPadY * 2.0f - st.ItemSpacing.y - 2.0f;
+    flow.begin("16-STEP SEQUENCER", gridW, gridH);
+    SequencerGrid(engine, totalSteps, ui.arpBeat, ImVec2(gridW, gridH));
     flow.end();
 }
 
@@ -520,6 +570,9 @@ static void drawTunings(s1::Engine &engine, UiState &ui) {
     // panels fit. Give its knobs back a proper touch target -- A4 and the two
     // bend ranges are exactly the controls you want to nudge by hand.
     KnobFloor bigKnobs(64.0f);
+    // Desktop asks for a bigger face than the 46px default; the compact floor
+    // above wins on the Pi. Measured and drawn at the same size.
+    constexpr float kK = 60.0f;
 
     BlockFlow flow;
 
@@ -540,7 +593,7 @@ static void drawTunings(s1::Engine &engine, UiState &ui) {
     // instead of leaving the space empty.
     // The gap between shelves is ImGui's line advance (ItemSpacing.y), not the
     // horizontal kBlockGap the flow uses within a shelf.
-    const float shelfTwo = blockRowH() + blockTitleH() + kBlockPadY * 2.0f +
+    const float shelfTwo = blockRowH(1, kK) + blockTitleH() + kBlockPadY * 2.0f +
                            ImGui::GetStyle().ItemSpacing.y;
     const float wheel = std::clamp(ImGui::GetContentRegionAvail().y - shelfTwo -
                                        blockTitleH() - kBlockPadY * 2.0f,
@@ -589,8 +642,8 @@ static void drawTunings(s1::Engine &engine, UiState &ui) {
     }
     flow.end();
 
-    flow.begin("MASTER TUNING", kw("A4") + kBlockGap + 150.0f, blockRowH());
-    Knob(engine, {frequencyA4, "A4", 1.0f, Units::Hertz}); ImGui::SameLine(0.0f, kBlockGap);
+    flow.begin("MASTER TUNING", kw("A4", kK) + kBlockGap + 150.0f, blockRowH(1, kK));
+    Knob(engine, {frequencyA4, "A4", 1.0f, Units::Hertz}, kK); ImGui::SameLine(0.0f, kBlockGap);
     ImGui::BeginGroup();
     ImGui::TextColored(ImColor(color::kTextDim), "notes/oct %d", engine.tuningNotesPerOctave());
     if (ImGui::Button("Reset to 12-ET", ImVec2(150, 0))) {
@@ -600,9 +653,9 @@ static void drawTunings(s1::Engine &engine, UiState &ui) {
     ImGui::EndGroup();
     flow.end();
 
-    flow.begin("PITCH BEND", kwRow({"DOWN", "UP"}), blockRowH());
-    Knob(engine, {pitchbendMinSemitones, "DOWN", 1.0f, Units::Semitones}); ImGui::SameLine();
-    Knob(engine, {pitchbendMaxSemitones, "UP",   1.0f, Units::Semitones});
+    flow.begin("PITCH BEND", kwRow({"DOWN", "UP"}, kK), blockRowH(1, kK));
+    Knob(engine, {pitchbendMinSemitones, "DOWN", 1.0f, Units::Semitones}, kK); ImGui::SameLine();
+    Knob(engine, {pitchbendMaxSemitones, "UP",   1.0f, Units::Semitones}, kK);
     flow.end();
 }
 

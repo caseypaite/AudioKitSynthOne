@@ -541,17 +541,28 @@ bool TouchPadXY(const char *id, const ImVec2 &size, float &x, float &y, bool lat
     return changed;
 }
 
-bool SequencerGrid(s1::Engine &engine, int totalSteps, int currentStep, float rowHeight) {
+bool SequencerGrid(s1::Engine &engine, int totalSteps, int currentStep, const ImVec2 &size) {
     bool changed = false;
-    const float cellWidth = 44.0f;
-    // 48 cells in a 16x3 grid are the hardest things on the panel to hit with a
-    // finger; a caller with height to spare passes a taller row.
-    const float rowH = rowHeight > 0.0f ? rowHeight : 0.0f;
+
+    constexpr int kSteps = 16;
+    constexpr float kGap = 3.0f;
+    constexpr float kLedH = 10.0f;
+
+    const ImGuiStyle &st = ImGui::GetStyle();
+    const float cellWidth = size.x > 0.0f
+                                ? std::max(28.0f, (size.x - kGap * (kSteps - 1)) / kSteps)
+                                : 44.0f;
+
+    // Column: beat LED, transpose slider, octave boost, note on. The slider
+    // takes whatever height is left once the rest is accounted for.
+    const float fixed = kLedH + st.ItemSpacing.y * 3.0f + ImGui::GetFrameHeight() * 2.0f +
+                        ImGui::GetTextLineHeightWithSpacing();
+    const float sliderH = size.y > 0.0f ? std::max(40.0f, size.y - fixed) : 64.0f;
 
     ImGui::BeginGroup();
     ImGui::TextColored(ImColor(color::kTextDim), "STEP");
-    for (int i = 0; i < 16; ++i) {
-        if (i > 0) ImGui::SameLine(0.0f, 3.0f);
+    for (int i = 0; i < kSteps; ++i) {
+        if (i > 0) ImGui::SameLine(0.0f, kGap);
         ImGui::BeginGroup();
         ImGui::PushID(i);
 
@@ -560,34 +571,34 @@ bool SequencerGrid(s1::Engine &engine, int totalSteps, int currentStep, float ro
 
         // Step-position LED
         const ImVec2 ledPos = ImGui::GetCursorScreenPos();
-        ImGui::Dummy(ImVec2(cellWidth, 10.0f));
+        ImGui::Dummy(ImVec2(cellWidth, kLedH));
         ImGui::GetWindowDrawList()->AddCircleFilled(
-            ImVec2(ledPos.x + cellWidth * 0.5f, ledPos.y + 5.0f), 4.0f,
+            ImVec2(ledPos.x + cellWidth * 0.5f, ledPos.y + kLedH * 0.5f), 4.0f,
             playing ? color::kLED : (inRange ? color::kTrack : color::kPanel), 12);
 
-        // Transpose for this step
+        // Transpose: a vertical slider over the parameter's own range, which is
+        // -12..+12 semitones, matching the iOS VerticalSlider for this step.
         const S1Parameter noteParam = static_cast<S1Parameter>(sequencerPattern00 + i);
         int transpose = static_cast<int>(std::lround(engine.getParameter(noteParam)));
-        ImGui::SetNextItemWidth(cellWidth);
-        if (rowH > 0.0f) {
-            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
-                                ImVec2(ImGui::GetStyle().FramePadding.x,
-                                       (rowH - ImGui::GetTextLineHeight()) * 0.5f));
-        }
-        if (ImGui::DragInt("##t", &transpose, 0.15f, -12, 12, "%+d")) {
+        const int lo = static_cast<int>(std::lround(engine.minimum(noteParam)));
+        const int hi = static_cast<int>(std::lround(engine.maximum(noteParam)));
+        ImGui::PushStyleColor(ImGuiCol_FrameBg,
+                              ImColor(inRange ? color::kKnobBody : color::kPanel).Value);
+        if (ImGui::VSliderInt("##t", ImVec2(cellWidth, sliderH), &transpose, lo, hi, "%+d")) {
             engine.setParameter(noteParam, static_cast<float>(transpose));
             changed = true;
         }
+        ImGui::PopStyleColor();
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("step %d: %+d semitones", i + 1, transpose);
 
         // Octave boost
         const S1Parameter octParam = static_cast<S1Parameter>(sequencerOctBoost00 + i);
-        if (Toggle(engine, octParam, "8va", ImVec2(cellWidth, rowH))) changed = true;
+        if (Toggle(engine, octParam, "8va", ImVec2(cellWidth, 0))) changed = true;
 
         // Note on/off
         const S1Parameter onParam = static_cast<S1Parameter>(sequencerNoteOn00 + i);
-        if (Toggle(engine, onParam, "on", ImVec2(cellWidth, rowH))) changed = true;
+        if (Toggle(engine, onParam, "on", ImVec2(cellWidth, 0))) changed = true;
 
-        if (rowH > 0.0f) ImGui::PopStyleVar();
         ImGui::PopID();
         ImGui::EndGroup();
     }
