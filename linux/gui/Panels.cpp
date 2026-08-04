@@ -180,9 +180,10 @@ static void drawGenerators(s1::Engine &engine, UiState &) {
     // faces spend both: wider blocks pack the shelves fuller, taller cells use
     // the space under them.
     KnobFloor bigKnobs(72.0f);
-    // A desktop pane has room for more than the 46px default too; compact's
-    // floor above still wins there. Measured and drawn at the same size.
-    constexpr float kK = 60.0f;
+    // A desktop pane has room for a good deal more than the 46px default;
+    // compact's floor above still wins there. Measured and drawn at the same
+    // size. 80px is where MAIN stops: the next step up wraps a third shelf.
+    constexpr float kK = 80.0f;
     const float rowH = blockRowH(1, kK);
 
     BlockFlow flow;
@@ -387,8 +388,10 @@ static void drawEffects(s1::Engine &engine, UiState &ui) {
     //
     // A desktop pane is a different story -- FX packs into two shelves there
     // and has height going spare -- so the requested size is larger and the
-    // compact scaling takes it back down to 32px on the Pi.
-    constexpr float kK = 60.0f;
+    // compact scaling takes it back down to 32px on the Pi. 64px is the
+    // ceiling: at 68 the LFO shelf plus the routing block reaches 1420px and
+    // the matrix wraps, which costs a whole shelf.
+    constexpr float kK = 64.0f;
     const float rowH = knobBlockH(1, kK);
 
     BlockFlow flow;
@@ -433,7 +436,10 @@ static void drawEffects(s1::Engine &engine, UiState &ui) {
     const int kRoutingRows = 3;
     const float routingH = ImGui::GetTextLineHeightWithSpacing() +
                            kRoutingRows * ImGui::GetFrameHeightWithSpacing();
-    flow.begin("LFO ROUTING", 640.0f, routingH);
+    // 604 is what the four blocks of three actually measure; the 640 it used to
+    // declare was guesswork, and those 36px are the difference between the LFO
+    // shelf fitting beside it and the matrix wrapping onto its own.
+    flow.begin("LFO ROUTING", 604.0f, routingH);
     ModMatrix(engine, kLfoTargets2,
               static_cast<int>(sizeof(kLfoTargets2) / sizeof(kLfoTargets2[0])), 4);
     flow.end();
