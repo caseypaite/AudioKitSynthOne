@@ -62,26 +62,59 @@ bool knobBehaviour(const char *id, const ImVec2 &size, float &position, bool &re
     return changed;
 }
 
+bool gLearnMode = false;
+bool gCompactWidgets = false;
+
+/// Height of the label + readout block above a knob face.
+float knobLabelBlock() { return gCompactWidgets ? 20.0f : 28.0f; }
+
 void labelledReadout(const ImVec2 &topLeft, float width, const char *label,
                      const std::string &readout, bool hovered) {
     ImDrawList *dl = ImGui::GetWindowDrawList();
+    const bool showValue = hovered && !readout.empty();
+
+    // Roomy stacks the value under the caption. Compact has only one line to
+    // spend, so the value takes the caption's place while the knob is being
+    // touched: at the moment you are turning something you know which control
+    // it is, and the number is what you need to see.
+    if (gCompactWidgets && showValue) {
+        const ImVec2 valueSize = ImGui::CalcTextSize(readout.c_str());
+        dl->AddText(ImVec2(topLeft.x + (width - valueSize.x) * 0.5f, topLeft.y),
+                    color::kAccent, readout.c_str());
+        return;
+    }
+
     const ImVec2 labelSize = ImGui::CalcTextSize(label);
     dl->AddText(ImVec2(topLeft.x + (width - labelSize.x) * 0.5f, topLeft.y),
                 color::kTextDim, label);
 
-    if (hovered && !readout.empty()) {
+    if (showValue) {
         const ImVec2 valueSize = ImGui::CalcTextSize(readout.c_str());
         dl->AddText(ImVec2(topLeft.x + (width - valueSize.x) * 0.5f, topLeft.y + 14.0f),
                     color::kAccent, readout.c_str());
     }
 }
 
-bool gLearnMode = false;
-
 } // namespace
 
 void SetLearnMode(bool on) { gLearnMode = on; }
 bool LearnMode() { return gLearnMode; }
+
+void SetCompactWidgets(bool on) { gCompactWidgets = on; }
+bool CompactWidgets() { return gCompactWidgets; }
+
+// 0.70 takes the standard 46px face to 32px and the emphasis 58px to 41px,
+// which is what lets the busiest panel (FX: four sections, thirty controls)
+// finish above the fold. The floor stops a knob becoming a dot on some future
+// smaller display.
+float KnobDiameter(float requested) {
+    // Compact also drops the emphasis size: a few panels ask for 58px to
+    // highlight CUTOFF, VOLUME and the like, and that one oversized knob sets
+    // the height of its whole row. Uniform cells buy a row back on FX, and the
+    // emphasis reads poorly at this scale anyway.
+    if (!gCompactWidgets) return requested;
+    return std::max(32.0f, std::min(requested, 46.0f) * 0.70f);
+}
 
 std::string FormatValue(float value, Units units) {
     char buf[64];
@@ -105,14 +138,20 @@ std::string FormatValue(float value, Units units) {
     return buf;
 }
 
-bool Knob(s1::Engine &engine, const KnobSpec &spec, float diameter) {
+bool Knob(s1::Engine &engine, const KnobSpec &spec, float requested) {
     ImGui::PushID(static_cast<int>(spec.parameter));
 
-    const float width = std::max(diameter + 8.0f, 56.0f);
+    const float diameter = KnobDiameter(requested);
+    // The cell keeps at least 56px whatever the face does: that width is the
+    // drag target, so the control stays finger-sized while the paint shrinks.
+    // It also never goes narrower than its own caption, or neighbouring labels
+    // run into each other once the knobs are small.
+    const float width = std::max({diameter + 8.0f, 56.0f,
+                                  ImGui::CalcTextSize(spec.label).x + 6.0f});
     const ImVec2 origin = ImGui::GetCursorScreenPos();
 
     ImGui::BeginGroup();
-    ImGui::Dummy(ImVec2(width, 28.0f)); // room for label + readout
+    ImGui::Dummy(ImVec2(width, knobLabelBlock())); // room for label + readout
 
     const ImVec2 knobTopLeft = ImGui::GetCursorScreenPos();
     const float radius = diameter * 0.5f;
@@ -168,14 +207,16 @@ bool Knob(s1::Engine &engine, const KnobSpec &spec, float diameter) {
 }
 
 bool DependentKnob(s1::Engine &engine, S1Parameter parameter, const char *label, int payload,
-                   const char *readout, float diameter) {
+                   const char *readout, float requested) {
     ImGui::PushID(static_cast<int>(parameter) + 10000);
 
-    const float width = std::max(diameter + 8.0f, 56.0f);
+    const float diameter = KnobDiameter(requested);
+    const float width = std::max({diameter + 8.0f, 56.0f,
+                                  ImGui::CalcTextSize(label).x + 6.0f});
     const ImVec2 origin = ImGui::GetCursorScreenPos();
 
     ImGui::BeginGroup();
-    ImGui::Dummy(ImVec2(width, 28.0f));
+    ImGui::Dummy(ImVec2(width, knobLabelBlock()));
 
     const ImVec2 knobTopLeft = ImGui::GetCursorScreenPos();
     const float radius = diameter * 0.5f;
@@ -317,7 +358,8 @@ bool ModMatrix(s1::Engine &engine, const ModTarget *targets, int count, int bloc
         ImGui::TableNextRow();
         for (int b = 0; b < blocks; ++b) {
             ImGui::TableSetColumnIndex(b * 3);
-            ImGui::TextColored(ImColor(color::kTextDim), "DESTINATION");
+            // Four blocks of headings need the short form to stay in width.
+            ImGui::TextColored(ImColor(color::kTextDim), blocks > 2 ? "DEST" : "DESTINATION");
             ImGui::TableSetColumnIndex(b * 3 + 1);
             ImGui::TextColored(ImColor(color::kOn), "LFO1");
             ImGui::TableSetColumnIndex(b * 3 + 2);
@@ -619,13 +661,15 @@ void PitchWheel(const ImVec2 &size, const float *frequencies, int count, const b
 }
 
 void SectionLabel(const char *text) {
-    ImGui::Spacing();
+    // The blank line above a heading is the first thing to go when the whole
+    // panel has to fit; the rule under it carries the grouping on its own.
+    if (!gCompactWidgets) ImGui::Spacing();
     ImGui::TextColored(ImColor(color::kAccent), "%s", text);
     ImDrawList *dl = ImGui::GetWindowDrawList();
     const ImVec2 p = ImGui::GetCursorScreenPos();
     dl->AddLine(ImVec2(p.x, p.y), ImVec2(p.x + ImGui::GetContentRegionAvail().x, p.y),
                 color::kPanelEdge);
-    ImGui::Spacing();
+    if (!gCompactWidgets) ImGui::Spacing();
 }
 
 } // namespace s1gui
