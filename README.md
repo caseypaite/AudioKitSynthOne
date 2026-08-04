@@ -77,9 +77,19 @@ with a fingertip is worse than one you have to scroll to.
 [`linux/README.md`](linux/README.md#blocks-not-rows) has the details, including
 the per-panel sizes and why each is what it is.
 
-Captured with [`linux/tools/screenshots.sh`](linux/tools/screenshots.sh) on a
-virtual X server at exactly the panel's resolution. The individual stills are
-gitignored; only the slideshow is tracked.
+### The same panels on a desktop
+
+![The desktop layout — two panels stacked, at 1440x900](screenshots/desktop.gif)
+
+A desktop gets two panels at once, UPPER and LOWER, each with its own tab row.
+Nothing is rearranged by hand for it: the blocks simply pack into wider, shorter
+shelves, so MAIN takes two shelves here against three on the 7" panel. Three
+frames cover all six panels.
+
+Both sets are captured with
+[`linux/tools/screenshots.sh`](linux/tools/screenshots.sh) (`--desktop` for the
+second) on a virtual X server at exactly the target resolution. The individual
+stills are gitignored; only the slideshows are tracked.
 
 ### Booting into it
 

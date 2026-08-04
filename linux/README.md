@@ -192,10 +192,13 @@ the panel's size:
 
 ```sh
 ./tools/screenshots.sh                      # -> ../screenshots/*.png + panels.gif
+./tools/screenshots.sh --desktop            # -> desktop-*.png + desktop.gif
 ./tools/screenshots.sh --geometry 1024x600  # a different panel
 ```
 
-The stills are gitignored; `screenshots/panels.gif` is the tracked artefact.
+The two modes match the two layouts: the default shoots one panel per frame at
+800x480, `--desktop` shoots stacked pairs at 1440x900, so three frames cover all
+six panels. The stills are gitignored; the two GIFs are the tracked artefacts.
 
 ### Designing for 800x480
 

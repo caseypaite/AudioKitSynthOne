@@ -7,9 +7,14 @@
 # assembles them into the slideshow the README shows.
 #
 #   ./screenshots.sh                        # -> screenshots/{panel}.png + panels.gif
+#   ./screenshots.sh --desktop              # -> screenshots/desktop-*.png + desktop.gif
 #   ./screenshots.sh --geometry 1024x600    # a different panel
 #   ./screenshots.sh --build-dir ../build   # binaries built elsewhere
 #   ./screenshots.sh --no-gif               # stills only
+#
+# The two modes match the two layouts: a small display shows one panel, a
+# desktop shows two stacked, so the desktop run shoots pairs rather than
+# singles and three frames cover all six panels.
 #
 # The stills are gitignored; panels.gif is the tracked artefact.
 #
@@ -29,12 +34,16 @@ REPO="$(cd -- "$LINUX/.." && pwd)"
 BUILD="$LINUX/build"
 OUTDIR="$REPO/screenshots"
 GEOMETRY="800x480"
+DESKTOP=0
 MAKE_GIF=1
 FRAME_DELAY=200          # centiseconds, so 2s a panel
 SETTLE=8                 # seconds to let banks load and the first frames draw
 
 # Panel ring order, matching ChildPanel on iOS.
 PANELS=(MAIN ENV PAD FX SEQ TUNE)
+
+# Desktop pairs: every panel once, each beside one it is actually used with.
+PAIRS=("MAIN FX" "ENV SEQ" "PAD TUNE")
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -45,13 +54,19 @@ while [ $# -gt 0 ]; do
         --geometry)    GEOMETRY="${2:?--geometry needs WxH}"; shift 2 ;;
         --geometry=*)  GEOMETRY="${1#*=}"; shift ;;
         --settle)      SETTLE="${2:?--settle needs seconds}"; shift 2 ;;
+        --desktop)     DESKTOP=1; shift ;;
         --no-gif)      MAKE_GIF=0; shift ;;
         -h|--help)
-            sed -n '3,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+            sed -n '3,25p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
             exit 0 ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
 done
+
+# --desktop only changes the defaults; an explicit --geometry still wins.
+if [ "$DESKTOP" -eq 1 ] && [ "$GEOMETRY" = "800x480" ]; then
+    GEOMETRY="1440x900"
+fi
 
 say() { printf '  %s\n' "$*"; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
@@ -78,7 +93,7 @@ echo "Capturing $GEOMETRY from $GUI"
 # through XDG_RUNTIME_DIR even when the variable is unset. Hiding both is what
 # makes it choose X11 and land on the Xvfb server rather than the desktop.
 capture() {
-    local panel="$1" out="$2"
+    local out="$1"; shift          # remaining arguments go to synthone-gui
     local runtime; runtime="$(mktemp -d)"
 
     env -u WAYLAND_DISPLAY \
@@ -88,31 +103,52 @@ capture() {
         xvfb-run -a -s "-screen 0 ${GEOMETRY}x24" \
         bash -c '
             set -eu
-            "$1" --backend portaudio --fullscreen --top "$2" >/dev/null 2>&1 &
+            gui_bin="$1"; out="$2"; settle="$3"; shift 3
+            "$gui_bin" --backend portaudio --fullscreen "$@" >/dev/null 2>&1 &
             gui=$!
-            sleep "$4"
+            sleep "$settle"
             kill -0 "$gui" 2>/dev/null || { echo "gui exited early" >&2; exit 1; }
-            import -window root "$3"
+            import -window root "$out"
             kill "$gui" 2>/dev/null || true
             wait "$gui" 2>/dev/null || true
-        ' _ "$GUI" "$panel" "$out" "$SETTLE"
+        ' _ "$GUI" "$out" "$SETTLE" "$@"
 
     rm -rf "$runtime"
 }
 
-for panel in "${PANELS[@]}"; do
-    lower="$(printf '%s' "$panel" | tr 'A-Z' 'a-z')"
-    out="$OUTDIR/$lower.png"
-    capture "$panel" "$out" || die "capture failed for $panel"
-
-    # A capture that races the first frame comes back uniformly black, and the
-    # only sign is the mean pixel value -- the file is a perfectly valid PNG.
-    mean="$(magick "$out" -format '%[fx:mean*255]' info:)"
+# Fails loudly on a capture that raced the first frame: it comes back uniformly
+# black, and the file is a perfectly valid PNG either way.
+check_not_blank() {
+    local f="$1" mean
+    mean="$(magick "$f" -format '%[fx:mean*255]' info:)"
     if [ "${mean%%.*}" -lt 5 ]; then
-        die "$lower.png looks blank (mean $mean); try --settle $((SETTLE + 4))"
+        die "$(basename "$f") looks blank (mean $mean); try --settle $((SETTLE + 4))"
     fi
-    say "$lower.png  $(magick identify -format '%wx%h' "$out")  mean $mean"
-done
+    printf '%s' "$mean"
+}
+
+SHOTS=()
+
+if [ "$DESKTOP" -eq 1 ]; then
+    for pair in "${PAIRS[@]}"; do
+        top="${pair%% *}"; bottom="${pair##* }"
+        name="desktop-$(printf '%s-%s' "$top" "$bottom" | tr 'A-Z' 'a-z').png"
+        out="$OUTDIR/$name"
+        capture "$out" --top "$top" --bottom "$bottom" || die "capture failed for $pair"
+        mean="$(check_not_blank "$out")"
+        say "$name  $(magick identify -format '%wx%h' "$out")  mean $mean"
+        SHOTS+=("$out")
+    done
+else
+    for panel in "${PANELS[@]}"; do
+        lower="$(printf '%s' "$panel" | tr 'A-Z' 'a-z')"
+        out="$OUTDIR/$lower.png"
+        capture "$out" --top "$panel" || die "capture failed for $panel"
+        mean="$(check_not_blank "$out")"
+        say "$lower.png  $(magick identify -format '%wx%h' "$out")  mean $mean"
+        SHOTS+=("$out")
+    done
+fi
 
 # ---------------------------------------------------------------------------
 # Slideshow
@@ -124,17 +160,15 @@ done
 # because flat UI panels already compress well.
 
 if [ "$MAKE_GIF" -eq 1 ]; then
-    frames=()
-    for panel in "${PANELS[@]}"; do
-        frames+=("$OUTDIR/$(printf '%s' "$panel" | tr 'A-Z' 'a-z').png")
-    done
+    GIF="$OUTDIR/panels.gif"
+    [ "$DESKTOP" -eq 1 ] && GIF="$OUTDIR/desktop.gif"
 
-    magick -delay "$FRAME_DELAY" -loop 0 "${frames[@]}" \
+    magick -delay "$FRAME_DELAY" -loop 0 "${SHOTS[@]}" \
            -dispose Background -layers OptimizeTransparency +remap -colors 128 \
-           "$OUTDIR/panels.gif"
-    # Count frames from the whole file: identify on panels.gif[0] selects one
-    # frame and dutifully reports "1".
-    say "panels.gif  $(magick identify "$OUTDIR/panels.gif" | wc -l) frames, $(magick identify -format '%wx%h' "$OUTDIR/panels.gif[0]"), $(du -h "$OUTDIR/panels.gif" | cut -f1)"
+           "$GIF"
+    # Count frames from the whole file: identify on file[0] selects one frame
+    # and dutifully reports "1".
+    say "$(basename "$GIF")  $(magick identify "$GIF" | wc -l) frames, $(magick identify -format '%wx%h' "$GIF[0]"), $(du -h "$GIF" | cut -f1)"
 fi
 
 echo
