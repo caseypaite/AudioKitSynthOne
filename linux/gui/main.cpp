@@ -59,8 +59,8 @@ private:
 void applySpacing(bool compact) {
     ImGuiStyle &style = ImGui::GetStyle();
     style.WindowPadding = compact ? ImVec2(6, 5)  : ImVec2(12, 10);
-    style.FramePadding  = compact ? ImVec2(6, 8)  : ImVec2(8, 5);
-    style.ItemSpacing   = compact ? ImVec2(6, 4)  : ImVec2(8, 7);
+    style.FramePadding  = compact ? ImVec2(6, 7)  : ImVec2(8, 5);
+    style.ItemSpacing   = compact ? ImVec2(6, 3)  : ImVec2(8, 7);
     style.ScrollbarSize = compact ? 16.0f : 12.0f;  // a touch-draggable bar
 }
 
@@ -238,7 +238,7 @@ int main(int argc, char **argv) {
     if (layoutName == "side" || layoutName == "side-by-side") { ui.sideBySide = true; ui.singlePanel = false; }
     else if (layoutName == "stacked" || layoutName == "stack") { ui.sideBySide = false; ui.singlePanel = false; }
     else if (layoutName == "single" || layoutName == "one") ui.singlePanel = true;
-    const bool layoutChosen = !layoutName.empty();
+
     if (ui.topPanel == ui.bottomPanel) {
         // Never start with the same panel in both slots.
         ui.bottomPanel = static_cast<s1gui::Panel>(
@@ -359,11 +359,16 @@ int main(int argc, char **argv) {
         if (wantCompact != ui.compact) {
             ui.compact = wantCompact;
             applySpacing(ui.compact);
-            // Two panels cannot both stay usable on a short display: each would
-            // get about 110px. Fall back to one, unless the user asked for a
-            // specific layout on the command line.
-            if (!layoutChosen) ui.singlePanel = ui.compact;
+            s1gui::SetCompactWidgets(ui.compact);
+            // singlePanel is the default at all resolutions; we do not reset it
+            // here. Compact only governs widget sizing (knobs, padding) and the
+            // keyboard auto-hide below.
+            //
+            // The on-screen keyboard is dead weight on a MIDI-driven box; start
+            // it hidden on a small display and let KEYS bring it back.
+            if (ui.compact) ui.showKeyboard = false;
         }
+
 
         ImGui::SetNextWindowPos(viewport->WorkPos);
         ImGui::SetNextWindowSize(viewport->WorkSize);

@@ -63,7 +63,13 @@ const char *PanelName(Panel panel) {
 // Generators / MAIN
 // ---------------------------------------------------------------------------
 
-static void drawGenerators(s1::Engine &engine, UiState &) {
+static void drawGenerators(s1::Engine &engine, UiState &ui) {
+    // Pack the two narrower sections (SUB/FM/NOISE and FILTER) side by side:
+    // same layout at all resolutions. On a large display you just get bigger
+    // knobs in the same grouping; on the Pi the knobs shrink but the structure
+    // is identical.
+    constexpr bool pack = true;
+
     SectionLabel("OSCILLATORS");
     ImGui::BeginGroup();
     Knob(engine, {index1, "MORPH 1", 1.0f, Units::Raw});             ImGui::SameLine();
@@ -78,6 +84,8 @@ static void drawGenerators(s1::Engine &engine, UiState &) {
     Knob(engine, {morphBalance, "MIX 1<>2", 1.0f, Units::Percent});
     ImGui::EndGroup();
 
+    // -- SUB / FM / NOISE and FILTER: one row each, or side by side ---------
+    ImGui::BeginGroup();
     SectionLabel("SUB / FM / NOISE");
     ImGui::BeginGroup();
     Knob(engine, {subVolume, "SUB", 1.0f, Units::Percent});          ImGui::SameLine();
@@ -86,13 +94,17 @@ static void drawGenerators(s1::Engine &engine, UiState &) {
     Toggle(engine, subOctaveDown, "-24", ImVec2(52, 0));
     Toggle(engine, subIsSquare, "SQR", ImVec2(52, 0));
     ImGui::EndGroup();                                                ImGui::SameLine();
-    ImGui::Dummy(ImVec2(18, 1));                                      ImGui::SameLine();
+    ImGui::Dummy(ImVec2(pack ? 8.0f : 18.0f, 1));                     ImGui::SameLine();
     Knob(engine, {fmVolume, "FM MIX", 1.0f, Units::Percent});        ImGui::SameLine();
     Knob(engine, {fmAmount, "FM MOD", 1.0f, Units::Raw});            ImGui::SameLine();
-    ImGui::Dummy(ImVec2(18, 1));                                      ImGui::SameLine();
+    ImGui::Dummy(ImVec2(pack ? 8.0f : 18.0f, 1));                     ImGui::SameLine();
     Knob(engine, {noiseVolume, "NOISE", 1.0f, Units::Percent});
     ImGui::EndGroup();
+    ImGui::EndGroup();
 
+    if (pack) ImGui::SameLine(0.0f, 18.0f);
+
+    ImGui::BeginGroup();
     SectionLabel("FILTER");
     ImGui::BeginGroup();
     Knob(engine, {cutoff, "CUTOFF", 2.0f, Units::Hertz}, 58.0f);     ImGui::SameLine();
@@ -100,6 +112,7 @@ static void drawGenerators(s1::Engine &engine, UiState &) {
     ImGui::BeginGroup();
     ImGui::Dummy(ImVec2(1, 22));
     Selector(engine, filterType, "TYPE", kFilterTypes, 3);
+    ImGui::EndGroup();
     ImGui::EndGroup();
     ImGui::EndGroup();
 
@@ -199,7 +212,7 @@ static void drawTouchPad(s1::Engine &engine, UiState &ui) {
 // Effects / FX
 // ---------------------------------------------------------------------------
 
-static void drawEffects(s1::Engine &engine, UiState &) {
+static void drawEffects(s1::Engine &engine, UiState &ui) {
     SectionLabel("LFO");
     ImGui::BeginGroup();
     Selector(engine, lfo1Index, "LFO1 WAVE", kLfoWaveforms, 4);
@@ -235,10 +248,11 @@ static void drawEffects(s1::Engine &engine, UiState &) {
         {bitcrushLFO,  "BITCRUSH"},
         {tremoloLFO,   "TREMOLO"},
     };
-    // Two side-by-side blocks of six; both LFOs lit on one row is the DSP's
-    // "LFO1+2", which averages them.
+    // Four columns regardless of display size: same 12 destinations, same
+    // compact shape. On desktop the columns are just wider.
     ModMatrix(engine, kLfoTargets2,
-              static_cast<int>(sizeof(kLfoTargets2) / sizeof(kLfoTargets2[0])), 2);
+              static_cast<int>(sizeof(kLfoTargets2) / sizeof(kLfoTargets2[0])),
+              4);
 
     SectionLabel("REVERB / DELAY");
     ImGui::BeginGroup();
@@ -311,7 +325,11 @@ static void drawTunings(s1::Engine &engine, UiState &ui) {
         frequencies[i] = engine.tuningTableFrequency(60 + i);
         playing[i] = (60 + i) < 128 ? ui.heldNotes[60 + i] : false;
     }
-    PitchWheel(ImVec2(230, 230), frequencies, npo, playing);
+    // The wheel and the scale list are the two things on this panel with
+    // arbitrary size, so they are what give way when the whole panel has to
+    // fit above the fold.
+    const float wheel = ui.compact ? 186.0f : 230.0f;
+    PitchWheel(ImVec2(wheel, wheel), frequencies, npo, playing);
 
     ImGui::Spacing();
     Knob(engine, {frequencyA4, "A4 MASTER", 1.0f, Units::Hertz}, 54.0f);
@@ -345,7 +363,8 @@ static void drawTunings(s1::Engine &engine, UiState &ui) {
         std::string needle = ui.tuningSearch;
         std::transform(needle.begin(), needle.end(), needle.begin(), ::tolower);
 
-        ImGui::BeginChild("tuninglist", ImVec2(430, 240), ImGuiChildFlags_Borders);
+        ImGui::BeginChild("tuninglist", ImVec2(430, ui.compact ? 196.0f : 240.0f),
+                          ImGuiChildFlags_Borders);
         for (size_t i = 0; i < tunings.size(); ++i) {
             if (!needle.empty()) {
                 std::string name = tunings[i].name;
@@ -479,20 +498,23 @@ void DrawHeader(s1::Engine &engine, UiState &ui) {
     }
 
     // One button cycles the three layouts: one panel, two stacked, two side by
-    // side. Single is the only one that leaves a panel usable on a short
-    // display, so it is where compact starts.
-    ImGui::SameLine(0.0f, gapSmall);
-    const char *layoutLabel = ui.singlePanel  ? (wide ? "LAYOUT: SINGLE" : "1 PANEL")
-                              : ui.sideBySide ? (wide ? "LAYOUT: SIDE" : "SIDE")
-                                              : (wide ? "LAYOUT: STACK" : "STACK");
-    if (ImGui::Button(layoutLabel, ImVec2(wide ? 130.0f : 84.0f, 0))) {
-        if (ui.singlePanel) { ui.singlePanel = false; ui.sideBySide = false; }
-        else if (!ui.sideBySide) { ui.sideBySide = true; }
-        else { ui.singlePanel = true; ui.sideBySide = false; }
-    }
-    if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("single = one panel at a time; stacked = top/bottom; "
-                          "side = split by a vertical divider");
+    // side. A short display has room for exactly one, so compact drops the
+    // button rather than offering two choices that do not fit -- and spends
+    // the width on the controls instead.
+    if (wide) {
+        ImGui::SameLine(0.0f, gapSmall);
+        const char *layoutLabel = ui.singlePanel  ? "LAYOUT: SINGLE"
+                                  : ui.sideBySide ? "LAYOUT: SIDE"
+                                                  : "LAYOUT: STACK";
+        if (ImGui::Button(layoutLabel, ImVec2(130.0f, 0))) {
+            if (ui.singlePanel) { ui.singlePanel = false; ui.sideBySide = false; }
+            else if (!ui.sideBySide) { ui.sideBySide = true; }
+            else { ui.singlePanel = true; ui.sideBySide = false; }
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("single = one panel at a time; stacked = top/bottom; "
+                              "side = split by a vertical divider");
+        }
     }
 
     ImGui::SameLine(0.0f, gapSmall);

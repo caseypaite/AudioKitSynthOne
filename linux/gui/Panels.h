@@ -30,7 +30,7 @@ struct UiState {
     /// One panel at a time, the way the iOS app does it. Two panels need about
     /// 800px of height between them; on a short display this is the only
     /// layout that leaves a panel usable.
-    bool  singlePanel = false;
+    bool  singlePanel = true;   // default for all display sizes; --layout stacked|side overrides
     /// Set from the framebuffer size each frame: a small display gets tighter
     /// chrome and a two-row header. Knobs and buttons keep their size -- the
     /// space comes out of padding, not out of the touch targets.
