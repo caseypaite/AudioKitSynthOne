@@ -162,17 +162,16 @@ reinstalls:
 | --- | --- | --- |
 | `BACKEND` | `portaudio` | ALSA directly, nothing to start first. `jack` if you run a server. |
 | `GEOMETRY` | empty | Empty fills the panel; the official 7" display is `800x480`. |
-| `LAYOUT` | empty | `single`, `stacked` or `side`. Empty lets the GUI choose -- see below. |
-| `TOP` / `BOTTOM` | empty | Panels: `MAIN ENV PAD FX SEQ TUNE`. |
+| `TOP` / `BOTTOM` | empty | Which panel opens first: `MAIN ENV PAD FX SEQ TUNE`. |
 | `MIDI` | `all` | ALSA source as `CLIENT:PORT`, or everything. |
 | `HIDE_CURSOR` | `1` | Pointer off, for a touch panel. |
 | `VT` / `DISPLAY_NUM` | `vt1` / `:0` | Which console and display to take. |
 | `XSERVER_ARGS` | `-nolisten tcp -nocursor` | Passed to X. |
 | `EXTRA_ARGS` | empty | Anything else for `synthone-gui`. |
 
-The GUI flags this relies on -- `--fullscreen`, `--hide-cursor`, `--compact`
-and `--layout single` -- work on their own too, so you can try the kiosk
-configuration inside a desktop session before committing to it:
+The GUI flags this relies on -- `--fullscreen`, `--hide-cursor` and
+`--compact` -- work on their own too, so you can try the kiosk configuration
+inside a desktop session before committing to it:
 
 ```sh
 synthone-gui --geometry 800x480      # exactly what the panel will show
@@ -215,7 +214,8 @@ What changes, and why:
 - **One panel at a time,** as the iOS app does it, switched by its own tab
   row. Two stacked panels leave about 116px each at this height, which is not
   enough for a single row of knobs; one panel with the keyboard hidden gets
-  ~367px.
+  ~367px. On a desktop the arithmetic reverses and both panels are shown --
+  see below.
 - **The on-screen keyboard starts hidden,** and shrinks from 150px to 108px
   when you bring it back with KEYS. A box driven by a MIDI controller does not
   need it, and it costs a quarter of the height.
@@ -228,6 +228,27 @@ What changes, and why:
 None of this is Pi-specific: it keys off the framebuffer size, so a resized
 desktop window crosses the same threshold and a 1024x600 panel gets the same
 treatment with more room to spend.
+
+### One panel or two
+
+How many panels are on screen is decided by the display, not by the user:
+
+| Display | Layout |
+| --- | --- |
+| Below 1000x620 | One panel, its own tab row, keyboard hidden. |
+| Desktop | Two panels stacked, UPPER and LOWER, each independently navigable. |
+
+There is no layout button and no `--layout` flag. Offering the choice only
+invited picking the arrangement that does not fit -- two panels on the 7" panel
+leave 116px each, and one panel on a desktop wastes half the screen. Side by
+side is gone entirely: panels are laid out wide, so splitting the width was the
+one arrangement that made every panel scroll.
+
+A stacked pane on a 900px screen is about 330px tall, so panels have to fit
+that as well as the Pi's 367px. Anything sized in absolute pixels needs to come
+from `GetContentRegionAvail()` rather than a constant -- the pitch wheel on TUNE
+and the XY pads on PAD both do, and grow or shrink to whichever pane they land
+in.
 
 ### Blocks, not rows
 

@@ -24,13 +24,11 @@ struct UiState {
     Panel bottomPanel = Panel::Effects;
     bool  showKeyboard = true;
     bool  showPresets = false;
-    /// false = the two panels stack top/bottom; true = split by a vertical
-    /// divider so they sit left/right. Ignored when singlePanel is set.
-    bool  sideBySide = false;
-    /// One panel at a time, the way the iOS app does it. Two panels need about
-    /// 800px of height between them; on a short display this is the only
-    /// layout that leaves a panel usable.
-    bool  singlePanel = true;   // default for all display sizes; --layout stacked|side overrides
+    /// One panel at a time, the way the iOS app does it, or two stacked.
+    /// Not a preference: it is set from `compact` each time the display
+    /// crosses the threshold. A short screen has room for one panel; a desktop
+    /// has room for two and shows both rather than hiding one behind a tab.
+    bool  singlePanel = true;
     /// Set from the framebuffer size each frame: a small display gets tighter
     /// chrome and a two-row header. Knobs and buttons keep their size -- the
     /// space comes out of padding, not out of the touch targets.

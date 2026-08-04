@@ -154,7 +154,7 @@ int main(int argc, char **argv) {
     bool hideCursor = false;
     bool geometryGiven = false;
     int  compactMode = -1;   // -1 = decide from the display, 0 = off, 1 = on
-    std::string topPanelName, bottomPanelName, layoutName;
+    std::string topPanelName, bottomPanelName;
 
     auto panelByName = [](const std::string &name, s1gui::Panel &out) {
         for (int i = 0; i < static_cast<int>(s1gui::Panel::Count); ++i) {
@@ -176,7 +176,6 @@ int main(int argc, char **argv) {
         else if (arg == "--tunings") tuningsPath = next();
         else if (arg == "--top") topPanelName = next();
         else if (arg == "--bottom") bottomPanelName = next();
-        else if (arg == "--layout") layoutName = next();
         else if (arg == "--compact") compactMode = 1;
         else if (arg == "--no-compact") compactMode = 0;
         else if (arg == "--geometry") {
@@ -193,7 +192,6 @@ int main(int argc, char **argv) {
             std::printf("usage: synthone-gui [--backend jack|portaudio] [--resources DIR]\n"
                         "                    [--midi CLIENT:PORT|all] [--geometry WxH]\n"
                         "                    [--top PANEL] [--bottom PANEL]\n"
-                        "                    [--layout single|stacked|side]\n"
                         "                    [--fullscreen] [--hide-cursor]\n"
                         "                    [--compact | --no-compact]\n"
                         "  PANEL: MAIN ENV PAD FX SEQ TUNE\n"
@@ -235,9 +233,6 @@ int main(int argc, char **argv) {
     s1gui::UiState ui;
     if (!topPanelName.empty()) panelByName(topPanelName, ui.topPanel);
     if (!bottomPanelName.empty()) panelByName(bottomPanelName, ui.bottomPanel);
-    if (layoutName == "side" || layoutName == "side-by-side") { ui.sideBySide = true; ui.singlePanel = false; }
-    else if (layoutName == "stacked" || layoutName == "stack") { ui.sideBySide = false; ui.singlePanel = false; }
-    else if (layoutName == "single" || layoutName == "one") ui.singlePanel = true;
 
     if (ui.topPanel == ui.bottomPanel) {
         // Never start with the same panel in both slots.
@@ -360,14 +355,18 @@ int main(int argc, char **argv) {
             ui.compact = wantCompact;
             applySpacing(ui.compact);
             s1gui::SetCompactWidgets(ui.compact);
-            // singlePanel is the default at all resolutions; we do not reset it
-            // here. Compact only governs widget sizing (knobs, padding) and the
-            // keyboard auto-hide below.
-            //
             // The on-screen keyboard is dead weight on a MIDI-driven box; start
             // it hidden on a small display and let KEYS bring it back.
             if (ui.compact) ui.showKeyboard = false;
         }
+
+        // The display decides the layout, so there is nothing to choose: a
+        // short screen has room for exactly one panel, a desktop has room for
+        // two and is better off showing them than hiding one behind a tab.
+        // Set every frame rather than on the threshold crossing above -- a
+        // desktop starts non-compact and never crosses it, so a transition-only
+        // assignment would leave this at its initial value.
+        ui.singlePanel = ui.compact;
 
 
         ImGui::SetNextWindowPos(viewport->WorkPos);
@@ -407,32 +406,17 @@ int main(int argc, char **argv) {
                 // the panel ends exactly where the keyboard bar begins.
                 const float remaining = ImGui::GetContentRegionAvail().y - keyboardHeight - 4.0f;
                 drawSlot("toppanel", ui.topPanel, ImVec2(0, remaining));
-            } else if (ui.sideBySide) {
-                // Split by a vertical divider: the two panels sit left and right,
-                // each full height. Panels are laid out wide, so each one scrolls
-                // horizontally inside its own pane at this width.
-                const float paneWidth = (ImGui::GetContentRegionAvail().x - 8.0f) * 0.5f;
-                const float paneHeight = bodyHeight - 8.0f;
-
-                ImGui::BeginGroup();
-                panelTabs("top", "LEFT", ui.topPanel, ui.bottomPanel);
-                drawSlot("toppanel", ui.topPanel, ImVec2(paneWidth, paneHeight));
-                ImGui::EndGroup();
-
-                ImGui::SameLine(0.0f, 8.0f);
-
-                ImGui::BeginGroup();
-                panelTabs("bottom", "RIGHT", ui.bottomPanel, ui.topPanel);
-                drawSlot("bottompanel", ui.bottomPanel, ImVec2(paneWidth, paneHeight));
-                ImGui::EndGroup();
             } else {
-                const float panelHeight = bodyHeight * 0.5f - 24.0f;
+                // Desktop: both panels stacked, each with its own tab row. Two
+                // panes of a 900px screen give ~330px each, which the block
+                // flow fills by packing wider shelves than it would at 800x480.
+                const float paneHeight = bodyHeight * 0.5f - 24.0f;
 
                 panelTabs("top", "UPPER", ui.topPanel, ui.bottomPanel);
-                drawSlot("toppanel", ui.topPanel, ImVec2(0, panelHeight));
+                drawSlot("toppanel", ui.topPanel, ImVec2(0, paneHeight));
 
                 panelTabs("bottom", "LOWER", ui.bottomPanel, ui.topPanel);
-                drawSlot("bottompanel", ui.bottomPanel, ImVec2(0, panelHeight));
+                drawSlot("bottompanel", ui.bottomPanel, ImVec2(0, paneHeight));
             }
 
             if (ui.showKeyboard) s1gui::DrawKeyboardBar(engine, ui);

@@ -40,10 +40,6 @@ void endPanelChild() {
     ImGui::PopStyleColor();
 }
 
-// Standard knob cell footprint: the wider of the drag target and the typical
-// label so neighbouring groups don't collide.
-float kw() { return std::max({KnobDiameter() + 8.0f, 56.0f}); }
-
 // Width one knob cell will actually occupy. A caption wider than the face
 // widens the cell (see Knob()), so measuring with the bare kw() under-counts a
 // row and centreH() then shoves it right until the last knob runs off the
@@ -59,17 +55,6 @@ float kwRow(std::initializer_list<const char *> labels) {
     if (labels.size() > 1) w += ImGui::GetStyle().ItemSpacing.x * (labels.size() - 1);
     return w;
 }
-
-// Advance the cursor so that `w` pixels of content are centred within the
-// current column / available region. Call immediately before placing controls.
-void centreH(float w) {
-    const float off = std::max(0.0f, (ImGui::GetContentRegionAvail().x - w) * 0.5f);
-    if (off > 0.0f) ImGui::SetCursorPosX(ImGui::GetCursorPosX() + off);
-}
-
-// Table flags used for every horizontal-fill row.
-constexpr ImGuiTableFlags kHFill =
-    ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_NoPadOuterX;
 
 // ---------------------------------------------------------------------------
 // Block flow
@@ -510,7 +495,18 @@ static void drawTunings(s1::Engine &engine, UiState &ui) {
         playing[i] = (60 + i) < 128 ? ui.heldNotes[60 + i] : false;
     }
 
-    const float wheel = ui.compact ? 170.0f : 230.0f;
+    // The wheel and the scale list share the first shelf and set its height, so
+    // size them from what is left after the second shelf rather than fixing
+    // them. A stacked desktop pane is only ~330px tall, which a 230px wheel
+    // overflowed; the Pi's single panel is taller and now gets a bigger wheel
+    // instead of leaving the space empty.
+    // The gap between shelves is ImGui's line advance (ItemSpacing.y), not the
+    // horizontal kBlockGap the flow uses within a shelf.
+    const float shelfTwo = blockRowH() + blockTitleH() + kBlockPadY * 2.0f +
+                           ImGui::GetStyle().ItemSpacing.y;
+    const float wheel = std::clamp(ImGui::GetContentRegionAvail().y - shelfTwo -
+                                       blockTitleH() - kBlockPadY * 2.0f,
+                                   140.0f, 260.0f);
     flow.begin("PITCH WHEEL", wheel, wheel);
     PitchWheel(ImVec2(wheel, wheel), frequencies, npo, playing);
     flow.end();
@@ -678,20 +674,9 @@ void DrawHeader(s1::Engine &engine, UiState &ui) {
         ui.showSaveDialog = true;
     }
 
-    // Layout toggle: SINGLE (default) <-> STACK. Side-by-side is removed from
-    // the interactive cycle; --layout side on the CLI still works if needed.
-    if (wide) {
-        ImGui::SameLine(0.0f, gapSmall);
-        const char *layoutLabel = ui.singlePanel ? "LAYOUT: SINGLE" : "LAYOUT: STACK";
-        if (ImGui::Button(layoutLabel, ImVec2(120.0f, 0))) {
-            ui.singlePanel = !ui.singlePanel;
-            if (ui.singlePanel) ui.sideBySide = false;
-        }
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("SINGLE: one panel at a time (default)\n"
-                              "STACK: two panels top/bottom");
-        }
-    }
+    // No layout button: the display decides. A desktop shows two stacked
+    // panels, a short screen shows one, and offering a choice only invited
+    // picking the arrangement that does not fit.
 
     ImGui::SameLine(0.0f, gapSmall);
     ToggleValue(ui.showKeyboard, wide ? "KEYBOARD" : "KEYS", ImVec2(wide ? 100.0f : 64.0f, 0));

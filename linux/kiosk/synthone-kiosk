@@ -27,7 +27,6 @@ CONFIG="${SYNTHONE_KIOSK_CONFIG:-@CONFIG@}"
 
 BACKEND="portaudio"
 GEOMETRY=""
-LAYOUT=""
 TOP=""
 BOTTOM=""
 MIDI="all"
@@ -58,7 +57,6 @@ caller_argc=$#
 set -- "$@" "$GUI" --fullscreen --backend "$BACKEND"
 
 [ -n "$GEOMETRY" ] && set -- "$@" --geometry "$GEOMETRY"
-[ -n "$LAYOUT" ]   && set -- "$@" --layout "$LAYOUT"
 [ -n "$TOP" ]      && set -- "$@" --top "$TOP"
 [ -n "$BOTTOM" ]   && set -- "$@" --bottom "$BOTTOM"
 [ -n "$MIDI" ]     && set -- "$@" --midi "$MIDI"
