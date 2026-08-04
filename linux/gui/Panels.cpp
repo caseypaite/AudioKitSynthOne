@@ -44,8 +44,9 @@ void endPanelChild() {
 // widens the cell (see Knob()), so measuring with the bare kw() under-counts a
 // row and centreH() then shoves it right until the last knob runs off the
 // column. Keep this formula in step with Knob().
-float kw(const char *label) {
-    return std::max({KnobDiameter() + 8.0f, 56.0f, ImGui::CalcTextSize(label).x + 6.0f});
+float kw(const char *label, float diameter = 46.0f) {
+    return std::max({KnobDiameter(diameter) + 8.0f, 56.0f,
+                     ImGui::CalcTextSize(label).x + 6.0f});
 }
 
 // Total width of a row of knobs placed with SameLine(), captions included.
@@ -260,32 +261,69 @@ static void drawEnvelopes(s1::Engine &engine, UiState &) {
     // Each envelope is one block: its curve editor with the four knobs that
     // drive it directly underneath, so the graph and its controls read as one
     // thing instead of two stacked sections.
-    const float adsrKnobs = kwRow({"ATTACK", "DECAY", "SUSTAIN", "RELEASE"});
-    // The curve is a drag target too, so it grows with the knobs.
-    const float graphH = 112.0f;
-    const float envH = graphH + ImGui::GetStyle().ItemSpacing.y + KnobCellHeight();
+    //
+    // ENV has by far the fewest controls of any panel, so left at their natural
+    // size the blocks used about half a desktop pane. Size them from the region
+    // instead: the two envelopes split whatever the ENV AMOUNT block does not
+    // need, and the curve takes the height left under the knob row.
+    const ImVec2 avail = ImGui::GetContentRegionAvail();
+    const float style_x = ImGui::GetStyle().ItemSpacing.x;
+    const float style_y = ImGui::GetStyle().ItemSpacing.y;
 
-    flow.begin("AMPLITUDE", adsrKnobs, envH);
+    // A desktop pane leaves room for a bigger face than the 46px default; on a
+    // small display the panel's KnobFloor is larger still and wins. Every width
+    // below is measured at the same size, or the spread would overflow.
+    constexpr float kEnvKnob = 60.0f;
+    const float amountW = kw("FILTER ENV", kEnvKnob) + style_x + kw("PITCH TRACK", kEnvKnob);
+    const float knobsW  = kw("ATTACK", kEnvKnob) + kw("DECAY", kEnvKnob) +
+                          kw("SUSTAIN", kEnvKnob) + kw("RELEASE", kEnvKnob);
+
+    // Never narrower than the four knobs need; on a small display that is what
+    // it stays, and the ENV AMOUNT block drops to a second shelf as before.
+    const float fillW = (avail.x - amountW - kBlockPadX * 6.0f - kBlockGap * 2.0f) * 0.5f;
+    const float envW  = std::max(knobsW + style_x * 3.0f, fillW);
+
+    const bool oneShelf = (envW + kBlockPadX * 2.0f) * 2.0f +
+                          (amountW + kBlockPadX * 2.0f) + kBlockGap * 2.0f <= avail.x;
+
+    // If ENV AMOUNT wraps, its shelf has to come out of the height first.
+    const float reserve = oneShelf ? 0.0f
+                                   : KnobCellHeight(kEnvKnob) + blockTitleH() +
+                                         kBlockPadY * 2.0f + style_y;
+    const float graphH = std::clamp(avail.y - reserve - blockTitleH() - kBlockPadY * 2.0f -
+                                        style_y - KnobCellHeight(kEnvKnob),
+                                    80.0f, 280.0f);
+    const float envH = graphH + style_y + KnobCellHeight(kEnvKnob);
+
+    // Spread the four knobs across the block rather than leaving them bunched
+    // at the left with the curve stretched over them.
+    const float knobGap = std::max(style_x, (envW - knobsW) / 3.0f);
+
+    flow.begin("AMPLITUDE", envW, envH);
     ADSREditor(engine, attackDuration, decayDuration, sustainLevel, releaseDuration,
-               ImVec2(adsrKnobs, graphH), color::kAccent);
-    Knob(engine, {attackDuration,  "ATTACK",  1.0f, Units::Seconds}); ImGui::SameLine();
-    Knob(engine, {decayDuration,   "DECAY",   1.0f, Units::Seconds}); ImGui::SameLine();
-    Knob(engine, {sustainLevel,    "SUSTAIN", 1.0f, Units::Percent}); ImGui::SameLine();
-    Knob(engine, {releaseDuration, "RELEASE", 1.0f, Units::Seconds});
+               ImVec2(envW, graphH), color::kAccent);
+    Knob(engine, {attackDuration,  "ATTACK",  1.0f, Units::Seconds}, kEnvKnob); ImGui::SameLine(0.0f, knobGap);
+    Knob(engine, {decayDuration,   "DECAY",   1.0f, Units::Seconds}, kEnvKnob); ImGui::SameLine(0.0f, knobGap);
+    Knob(engine, {sustainLevel,    "SUSTAIN", 1.0f, Units::Percent}, kEnvKnob); ImGui::SameLine(0.0f, knobGap);
+    Knob(engine, {releaseDuration, "RELEASE", 1.0f, Units::Seconds}, kEnvKnob);
     flow.end();
 
-    flow.begin("FILTER", adsrKnobs, envH);
+    flow.begin("FILTER", envW, envH);
     ADSREditor(engine, filterAttackDuration, filterDecayDuration, filterSustainLevel,
-               filterReleaseDuration, ImVec2(adsrKnobs, graphH), color::kOn);
-    Knob(engine, {filterAttackDuration,  "ATTACK",  1.0f, Units::Seconds}); ImGui::SameLine();
-    Knob(engine, {filterDecayDuration,   "DECAY",   1.0f, Units::Seconds}); ImGui::SameLine();
-    Knob(engine, {filterSustainLevel,    "SUSTAIN", 1.0f, Units::Percent}); ImGui::SameLine();
-    Knob(engine, {filterReleaseDuration, "RELEASE", 1.0f, Units::Seconds});
+               filterReleaseDuration, ImVec2(envW, graphH), color::kOn);
+    Knob(engine, {filterAttackDuration,  "ATTACK",  1.0f, Units::Seconds}, kEnvKnob); ImGui::SameLine(0.0f, knobGap);
+    Knob(engine, {filterDecayDuration,   "DECAY",   1.0f, Units::Seconds}, kEnvKnob); ImGui::SameLine(0.0f, knobGap);
+    Knob(engine, {filterSustainLevel,    "SUSTAIN", 1.0f, Units::Percent}, kEnvKnob); ImGui::SameLine(0.0f, knobGap);
+    Knob(engine, {filterReleaseDuration, "RELEASE", 1.0f, Units::Seconds}, kEnvKnob);
     flow.end();
 
-    flow.begin("ENV AMOUNT", kwRow({"FILTER ENV", "PITCH TRACK"}), knobBlockH());
-    Knob(engine, {filterADSRMix,     "FILTER ENV",  1.0f, Units::Percent}); ImGui::SameLine();
-    Knob(engine, {adsrPitchTracking, "PITCH TRACK", 3.0f, Units::Percent});
+    // Matches the envelope blocks' height when it shares their shelf, so the
+    // row reads as one rack rather than a tall pair beside a stub.
+    const float amountH = oneShelf ? envH : KnobCellHeight(kEnvKnob);
+    flow.begin("ENV AMOUNT", amountW, amountH);
+    if (oneShelf) ImGui::Dummy(ImVec2(1.0f, (amountH - KnobCellHeight(kEnvKnob)) * 0.5f));
+    Knob(engine, {filterADSRMix,     "FILTER ENV",  1.0f, Units::Percent}, kEnvKnob); ImGui::SameLine();
+    Knob(engine, {adsrPitchTracking, "PITCH TRACK", 3.0f, Units::Percent}, kEnvKnob);
     flow.end();
 }
 
