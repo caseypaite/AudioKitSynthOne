@@ -62,8 +62,8 @@ instead of leaving a ragged edge on every row.
 
 ![The six panels — MAIN, ENV, PAD, FX, SEQ, TUNE — at 800x480](screenshots/panels.gif)
 
-Still frames are in [`screenshots/`](screenshots/), captured on a virtual X
-server at exactly the panel's resolution.
+Captured on a virtual X server at exactly the panel's resolution. The
+individual stills are gitignored; only the slideshow is tracked.
 
 ### Booting into it
 
