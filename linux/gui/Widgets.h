@@ -62,6 +62,10 @@ bool CompactWidgets();
 /// how tall a row will be.
 float KnobDiameter(float requested = 46.0f);
 
+/// Full height of a knob cell: the caption block plus the face. Panels use it
+/// to declare how tall a block of knobs will be before drawing it.
+float KnobCellHeight(float requested = 46.0f);
+
 /// Rotary knob bound directly to a synth parameter. Returns true if edited.
 /// Drag vertically to adjust; shift for fine; double-click resets to default.
 bool Knob(s1::Engine &engine, const KnobSpec &spec, float diameter = 46.0f);

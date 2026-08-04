@@ -107,6 +107,14 @@ bool CompactWidgets() { return gCompactWidgets; }
 // which is what lets the busiest panel (FX: four sections, thirty controls)
 // finish above the fold. The floor stops a knob becoming a dot on some future
 // smaller display.
+float KnobCellHeight(float requested) {
+    // The caption block and the face are two separate items inside the knob's
+    // group, so ImGui inserts ItemSpacing.y between them. Leaving that out made
+    // every block a few pixels short and clipped the bottom of the circles --
+    // 3px when compact, 7px on the desktop spacing.
+    return knobLabelBlock() + ImGui::GetStyle().ItemSpacing.y + KnobDiameter(requested);
+}
+
 float KnobDiameter(float requested) {
     // Compact also drops the emphasis size: a few panels ask for 58px to
     // highlight CUTOFF, VOLUME and the like, and that one oversized knob sets
