@@ -51,6 +51,17 @@ struct KnobSpec {
 void SetLearnMode(bool on);
 bool LearnMode();
 
+/// Compact mode shrinks the knob face and the label/readout block above it so
+/// a whole panel fits an 800x480 display without scrolling. The cell stays
+/// 56px wide and that whole width is draggable, so a fingertip still lands on
+/// it even though the painted circle is smaller.
+void SetCompactWidgets(bool on);
+bool CompactWidgets();
+
+/// Knob diameter after compact scaling. Panels use it when they need to know
+/// how tall a row will be.
+float KnobDiameter(float requested = 46.0f);
+
 /// Rotary knob bound directly to a synth parameter. Returns true if edited.
 /// Drag vertically to adjust; shift for fine; double-click resets to default.
 bool Knob(s1::Engine &engine, const KnobSpec &spec, float diameter = 46.0f);

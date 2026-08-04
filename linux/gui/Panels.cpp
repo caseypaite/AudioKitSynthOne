@@ -44,6 +44,22 @@ void endPanelChild() {
 // label so neighbouring groups don't collide.
 float kw() { return std::max({KnobDiameter() + 8.0f, 56.0f}); }
 
+// Width one knob cell will actually occupy. A caption wider than the face
+// widens the cell (see Knob()), so measuring with the bare kw() under-counts a
+// row and centreH() then shoves it right until the last knob runs off the
+// column. Keep this formula in step with Knob().
+float kw(const char *label) {
+    return std::max({KnobDiameter() + 8.0f, 56.0f, ImGui::CalcTextSize(label).x + 6.0f});
+}
+
+// Total width of a row of knobs placed with SameLine(), captions included.
+float kwRow(std::initializer_list<const char *> labels) {
+    float w = 0.0f;
+    for (const char *l : labels) w += kw(l);
+    if (labels.size() > 1) w += ImGui::GetStyle().ItemSpacing.x * (labels.size() - 1);
+    return w;
+}
+
 // Advance the cursor so that `w` pixels of content are centred within the
 // current column / available region. Call immediately before placing controls.
 void centreH(float w) {
@@ -88,20 +104,20 @@ static void drawGenerators(s1::Engine &engine, UiState &) {
         ImGui::TableNextRow();
 
         ImGui::TableSetColumnIndex(0);
-        centreH(3 * kw());
+        centreH(kwRow({"MORPH 1", "SEMI 1", "VOL 1"}));
         Knob(engine, {index1,              "MORPH 1", 1.0f, Units::Raw});       ImGui::SameLine();
         Knob(engine, {morph1SemitoneOffset,"SEMI 1",  1.0f, Units::Semitones}); ImGui::SameLine();
         Knob(engine, {morph1Volume,        "VOL 1",   1.0f, Units::Percent});
 
         ImGui::TableSetColumnIndex(1);
-        centreH(4 * kw());
+        centreH(kwRow({"MORPH 2", "SEMI 2", "DETUNE", "VOL 2"}));
         Knob(engine, {index2,              "MORPH 2", 1.0f, Units::Raw});       ImGui::SameLine();
         Knob(engine, {morph2SemitoneOffset,"SEMI 2",  1.0f, Units::Semitones}); ImGui::SameLine();
         Knob(engine, {morph2Detuning,      "DETUNE",  1.0f, Units::Raw});       ImGui::SameLine();
         Knob(engine, {morph2Volume,        "VOL 2",   1.0f, Units::Percent});
 
         ImGui::TableSetColumnIndex(2);
-        centreH(kw());
+        centreH(kw("MIX 1<>2"));
         Knob(engine, {morphBalance, "MIX 1<>2", 1.0f, Units::Percent});
 
         ImGui::EndTable();
@@ -114,7 +130,7 @@ static void drawGenerators(s1::Engine &engine, UiState &) {
         ImGui::TableSetColumnIndex(0);
         SectionLabel("SUB / FM / NOISE");
         // SUB knob + [-24/SQR toggle stack] + FM MIX + FM MOD + NOISE
-        centreH(kw() + 52.0f + 8.0f + kw() + kw() + 8.0f + kw());
+        centreH(kw("SUB") + 52.0f + 8.0f + kwRow({"FM MIX", "FM MOD"}) + 8.0f + kw("NOISE"));
         Knob(engine, {subVolume, "SUB", 1.0f, Units::Percent}); ImGui::SameLine();
         ImGui::BeginGroup();
         ImGui::Dummy(ImVec2(1, 22));
@@ -148,7 +164,7 @@ static void drawGenerators(s1::Engine &engine, UiState &) {
         ImGui::TableNextRow();
 
         ImGui::TableSetColumnIndex(0);
-        centreH(2 * kw());
+        centreH(kwRow({"VOLUME", "GLIDE"}));
         Knob(engine, {masterVolume, "VOLUME", 2.0f, Units::Percent}, 58.0f); ImGui::SameLine();
         Knob(engine, {glide,        "GLIDE",  2.0f, Units::Seconds});
 
@@ -213,10 +229,10 @@ static void drawEnvelopes(s1::Engine &engine, UiState &) {
     if (ImGui::BeginTable("env_amt", 2, kHFill)) {
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(0);
-        centreH(std::max({KnobDiameter(58.0f) + 8.0f, 56.0f}));
+        centreH(kw("FILTER ENV"));
         Knob(engine, {filterADSRMix,      "FILTER ENV",  1.0f, Units::Percent}, 58.0f);
         ImGui::TableSetColumnIndex(1);
-        centreH(std::max({KnobDiameter(58.0f) + 8.0f, 56.0f}));
+        centreH(kw("PITCH TRACK"));
         Knob(engine, {adsrPitchTracking,  "PITCH TRACK", 3.0f, Units::Percent}, 58.0f);
         ImGui::EndTable();
     }
@@ -284,9 +300,14 @@ static void drawEffects(s1::Engine &engine, UiState &ui) {
         DependentKnob(engine, lfo2Rate,      "LFO2 RATE", kLfo2RateEffectsPanelID, nullptr);
         ImGui::SameLine();
         Knob(engine, {lfo2Amplitude, "LFO2 AMT", 1.0f, Units::Percent});
-        ImGui::SameLine(0.0f, 16.0f);
+        ImGui::SameLine(0.0f, 8.0f);
         ImGui::BeginGroup(); ImGui::Dummy(ImVec2(1, 14));
-        Toggle(engine, tempoSyncToArpRate, "TEMPO SYNC", ImVec2(110, 0));
+        // Last item in a stretched column: take what is actually left rather
+        // than a fixed 110px, which ran past the column edge and clipped the
+        // caption to "TEMPO SY". Shorten the word before squeezing the button.
+        const float syncW = std::clamp(ImGui::GetContentRegionAvail().x, 60.0f, 110.0f);
+        Toggle(engine, tempoSyncToArpRate, syncW < 92.0f ? "SYNC" : "TEMPO SYNC",
+               ImVec2(syncW, 0));
         ImGui::EndGroup();
         ImGui::EndGroup();
 
@@ -344,14 +365,14 @@ static void drawEffects(s1::Engine &engine, UiState &ui) {
         ImGui::TableNextRow();
 
         ImGui::TableSetColumnIndex(0);
-        centreH(4 * kw());
+        centreH(kwRow({"PHASE MIX", "RATE", "FEEDBACK", "NOTCH"}));
         Knob(engine, {phaserMix,      "PHASE MIX", 1.0f, Units::Percent}); ImGui::SameLine();
         Knob(engine, {phaserRate,     "RATE",       2.0f, Units::Hertz});   ImGui::SameLine();
         Knob(engine, {phaserFeedback, "FEEDBACK",   1.0f, Units::Percent}); ImGui::SameLine();
         Knob(engine, {phaserNotchWidth,"NOTCH",     1.0f, Units::Hertz});
 
         ImGui::TableSetColumnIndex(1);
-        centreH(2 * kw());
+        centreH(kwRow({"PAN AMT", "PAN RATE"}));
         Knob(engine, {autoPanAmount, "PAN AMT", 1.0f, Units::Percent}); ImGui::SameLine();
         DependentKnob(engine, autoPanFrequency, "PAN RATE", kAutoPanEffectsPanelID, nullptr);
 
