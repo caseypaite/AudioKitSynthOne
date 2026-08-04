@@ -221,7 +221,7 @@ bool Knob(s1::Engine &engine, const KnobSpec &spec, float requested) {
 }
 
 bool DependentKnob(s1::Engine &engine, S1Parameter parameter, const char *label, int payload,
-                   const char *readout, float requested) {
+                   const char *readout, float requested, Units units) {
     ImGui::PushID(static_cast<int>(parameter) + 10000);
 
     const float diameter = KnobDiameter(requested);
@@ -236,22 +236,75 @@ bool DependentKnob(s1::Engine &engine, S1Parameter parameter, const char *label,
     const float radius = diameter * 0.5f;
     const ImVec2 centre(knobTopLeft.x + width * 0.5f, knobTopLeft.y + radius);
 
-    float position = engine.getDependentParameter(parameter);
+    // With tempo sync on, the kernel snaps these to discrete divisions: ask for
+    // 0.25 and it stores 0.222. Dragging from the snapped value each frame made
+    // the knob unusable -- a slow drag adds ~0.01 per frame, gets snapped back
+    // to where it started, and the control never moves however long you pull.
+    // Only a fast flick crossed a step boundary.
+    //
+    // So carry the un-snapped position across frames for as long as the drag
+    // lasts, and re-sync to the engine once it is let go.
+    ImGuiStorage *store = ImGui::GetStateStorage();
+    const ImGuiID dragKey = ImGui::GetID("depdragging");
+    const ImGuiID posKey  = ImGui::GetID("depdragpos");
+    const float engineValue = engine.getDependentParameter(parameter);
+    const bool wasDragging = store->GetBool(dragKey, false);
+    float position = wasDragging ? store->GetFloat(posKey, engineValue) : engineValue;
 
     bool reset = false;
     const bool dragged = knobBehaviour("dep", ImVec2(width, diameter), position, reset);
     const bool active = ImGui::IsItemActive();
     const bool hovered = ImGui::IsItemHovered() || active;
 
+    store->SetBool(dragKey, active);
+    if (active) store->SetFloat(posKey, position);
+
     bool changed = false;
-    if (dragged) {
+    const int boundCc = gLearnMode ? engine.ccForParameter(parameter) : -1;
+
+    // These behave like any other knob, which they previously did not: learn
+    // mode used to fall through to the drag, so clicking a tempo-syncable knob
+    // to bind it moved the value instead of arming it, and a double-click did
+    // nothing because `reset` was computed and then ignored.
+    if (gLearnMode) {
+        if (ImGui::IsItemClicked(ImGuiMouseButton_Left)) {
+            engine.setMidiLearnTaper(parameter, 1.0f);
+            engine.armMidiLearn(parameter);
+        } else if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
+            engine.clearMidiLearn(parameter);
+        }
+    } else if (reset) {
+        // The plain setter is right here: setSynthParameter routes dependent
+        // parameters through the kernel's rate helper, so the tempo-synced
+        // state follows.
+        engine.setParameter(parameter, engine.defaultValue(parameter));
+        changed = true;
+    } else if (dragged) {
         engine.setDependentParameter(parameter, position, payload);
         changed = true;
     }
 
+    const bool armed = gLearnMode && engine.midiLearnArmed() &&
+                       engine.midiLearnTarget() == parameter;
+    // Cyan stays the tempo-syncable knob's identity; armed shows as the learn
+    // colour, and the binding itself is reported in the readout.
     drawKnobFace(ImGui::GetWindowDrawList(), centre, radius,
-                 engine.getDependentParameter(parameter), active, color::kOn);
-    labelledReadout(origin, width, label, readout ? readout : std::string(), hovered);
+                 engine.getDependentParameter(parameter), active || armed,
+                 armed ? color::kLED : color::kOn);
+
+    // Without this these knobs were the only ones that never showed a value:
+    // every caller passes nullptr, which read as "no readout" rather than
+    // "derive one".
+    std::string text = readout ? std::string(readout)
+                               : FormatValue(engine.getParameter(parameter), units);
+    if (gLearnMode) {
+        char buf[32];
+        if (armed)             std::snprintf(buf, sizeof(buf), "learn...");
+        else if (boundCc >= 0) std::snprintf(buf, sizeof(buf), "CC %d", boundCc);
+        else                   std::snprintf(buf, sizeof(buf), "--");
+        text = buf;
+    }
+    labelledReadout(origin, width, label, text, hovered || gLearnMode);
     ImGui::EndGroup();
     ImGui::PopID();
     return changed;

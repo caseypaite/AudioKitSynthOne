@@ -401,14 +401,14 @@ static void drawEffects(s1::Engine &engine, UiState &ui) {
 
     flow.begin("LFO 1", selW + kBlockGap + kwRow({"RATE", "AMT"}, kK), rowH);
     Selector(engine, lfo1Index, "WAVE", kLfoWaveforms, 4); ImGui::SameLine(0.0f, kBlockGap);
-    DependentKnob(engine, lfo1Rate, "RATE", kLfo1RateEffectsPanelID, nullptr, kK);
+    DependentKnob(engine, lfo1Rate, "RATE", kLfo1RateEffectsPanelID, nullptr, kK, Units::Hertz);
     ImGui::SameLine();
     Knob(engine, {lfo1Amplitude, "AMT", 1.0f, Units::Percent}, kK);
     flow.end();
 
     flow.begin("LFO 2", selW + kBlockGap + kwRow({"RATE", "AMT"}, kK), rowH);
     Selector(engine, lfo2Index, "WAVE", kLfoWaveforms, 4); ImGui::SameLine(0.0f, kBlockGap);
-    DependentKnob(engine, lfo2Rate, "RATE", kLfo2RateEffectsPanelID, nullptr, kK);
+    DependentKnob(engine, lfo2Rate, "RATE", kLfo2RateEffectsPanelID, nullptr, kK, Units::Hertz);
     ImGui::SameLine();
     Knob(engine, {lfo2Amplitude, "AMT", 1.0f, Units::Percent}, kK);
     flow.end();
@@ -453,7 +453,7 @@ static void drawEffects(s1::Engine &engine, UiState &ui) {
 
     flow.begin("DELAY", 80.0f + kBlockGap + kwRow({"TIME", "FEEDBACK", "MIX"}, kK), rowH);
     Toggle(engine, delayOn, "ON", ImVec2(80, 0)); ImGui::SameLine(0.0f, kBlockGap);
-    DependentKnob(engine, delayTime, "TIME", kDelayTimeEffectsPanelID, nullptr, kK); ImGui::SameLine();
+    DependentKnob(engine, delayTime, "TIME", kDelayTimeEffectsPanelID, nullptr, kK, Units::Seconds); ImGui::SameLine();
     Knob(engine, {delayFeedback, "FEEDBACK", 1.0f, Units::Percent}, kK); ImGui::SameLine();
     Knob(engine, {delayMix,      "MIX",      1.0f, Units::Percent}, kK);
     flow.end();
@@ -467,7 +467,8 @@ static void drawEffects(s1::Engine &engine, UiState &ui) {
 
     flow.begin("AUTOPAN", kwRow({"PAN AMT", "PAN RATE"}, kK), rowH);
     Knob(engine, {autoPanAmount, "PAN AMT", 1.0f, Units::Percent}, kK); ImGui::SameLine();
-    DependentKnob(engine, autoPanFrequency, "PAN RATE", kAutoPanEffectsPanelID, nullptr, kK);
+    DependentKnob(engine, autoPanFrequency, "PAN RATE", kAutoPanEffectsPanelID, nullptr, kK,
+                  Units::Hertz);
     flow.end();
 
     flow.begin("BITCRUSH", kw("RATE", kK), rowH);
@@ -510,7 +511,7 @@ static void drawSequencer(s1::Engine &engine, UiState &ui) {
                    KnobCellHeight(kSeqKnob));
         Knob(engine, {arpInterval, "INTERVAL", 1.0f, Units::Index}, kSeqKnob); ImGui::SameLine();
         DependentKnob(engine, arpSeqTempoMultiplier, "TEMPO x", kArpSeqTempoMultiplierID,
-                      nullptr, kSeqKnob);
+                      nullptr, kSeqKnob, Units::Raw);
         flow.end();
 
         flow.begin("OCTAVES", 96.0f, stepperBlockH());

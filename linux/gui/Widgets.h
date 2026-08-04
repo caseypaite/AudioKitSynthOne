@@ -94,7 +94,8 @@ bool Knob(s1::Engine &engine, const KnobSpec &spec, float diameter = 46.0f);
 /// [0,1] space and can be rewritten by the DSP. `payload` identifies this
 /// control so the echo can be ignored.
 bool DependentKnob(s1::Engine &engine, S1Parameter parameter, const char *label,
-                   int payload, const char *readout, float diameter = 46.0f);
+                   int payload, const char *readout, float diameter = 46.0f,
+                   Units units = Units::Raw);
 
 /// On/off button bound to a parameter that the DSP treats as 0/1.
 bool Toggle(s1::Engine &engine, S1Parameter parameter, const char *label,
