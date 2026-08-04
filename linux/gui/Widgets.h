@@ -140,8 +140,10 @@ bool TouchPadXY(const char *id, const ImVec2 &size, float &x, float &y,
                 bool latched, const char *xLabel, const char *yLabel);
 
 /// 16-step sequencer grid: per-step transpose, octave boost and note-on.
-/// `currentStep` highlights the playing step; -1 for none.
-bool SequencerGrid(s1::Engine &engine, int totalSteps, int currentStep);
+/// `currentStep` highlights the playing step; -1 for none. `rowHeight` sets the
+/// height of each of the three cell rows; 0 uses the frame height.
+bool SequencerGrid(s1::Engine &engine, int totalSteps, int currentStep,
+                   float rowHeight = 0.0f);
 
 /// Playable keyboard. Returns the note under the pointer while held, else -1.
 /// `heldNotes` marks keys lit by MIDI or the sequencer.

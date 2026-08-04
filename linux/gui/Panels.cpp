@@ -267,13 +267,17 @@ static void drawGenerators(s1::Engine &engine, UiState &) {
 // ---------------------------------------------------------------------------
 
 static void drawEnvelopes(s1::Engine &engine, UiState &) {
+    // ENV holds ten controls and was finishing barely past the halfway mark.
+    KnobFloor bigKnobs(72.0f);
+
     BlockFlow flow;
 
     // Each envelope is one block: its curve editor with the four knobs that
     // drive it directly underneath, so the graph and its controls read as one
     // thing instead of two stacked sections.
     const float adsrKnobs = kwRow({"ATTACK", "DECAY", "SUSTAIN", "RELEASE"});
-    const float graphH = 96.0f;
+    // The curve is a drag target too, so it grows with the knobs.
+    const float graphH = 112.0f;
     const float envH = graphH + ImGui::GetStyle().ItemSpacing.y + KnobCellHeight();
 
     flow.begin("AMPLITUDE", adsrKnobs, envH);
@@ -307,11 +311,14 @@ static void drawEnvelopes(s1::Engine &engine, UiState &) {
 static void drawTouchPad(s1::Engine &engine, UiState &ui) {
     BlockFlow flow;
 
-    // The pads are the one thing here worth spending space on, so they take
-    // what the shelf will give them rather than a fixed 300px.
-    const float padW = std::min(300.0f, (ImGui::GetContentRegionAvail().x -
-                                         kBlockGap * 3.0f - kBlockPadX * 6.0f) * 0.5f);
-    const float padH = 232.0f;
+    // The pads are the whole panel and the only thing on it you touch, so they
+    // take everything the shelf will give them: the width left after the latch
+    // block, and the height left under the header.
+    const float latchBlockW = 120.0f + kBlockPadX * 2.0f;
+    const float padW = (ImGui::GetContentRegionAvail().x - latchBlockW -
+                        kBlockGap * 2.0f - kBlockPadX * 4.0f) * 0.5f;
+    const float padH = ImGui::GetContentRegionAvail().y - blockTitleH() -
+                       kBlockPadY * 2.0f - 4.0f;
 
     flow.begin("PAD 1  -  LFO1 RATE / AMOUNT", padW, padH);
     if (TouchPadXY("pad1", ImVec2(padW, padH), ui.pad1X, ui.pad1Y, ui.padLatch,
@@ -342,6 +349,10 @@ static void drawTouchPad(s1::Engine &engine, UiState &ui) {
 // ---------------------------------------------------------------------------
 
 static void drawEffects(s1::Engine &engine, UiState &ui) {
+    // FX keeps the 32px compact face. It carries thirty-odd controls in four
+    // shelves and clears the fold by about 10px; measured, even a 36px face
+    // costs 12px across its three knob shelves and brings the scrollbar back.
+    // This is the panel the compact sizing exists for.
     BlockFlow flow;
 
     // Selector width: four waveform buttons plus their caption line.
@@ -425,6 +436,11 @@ static void drawEffects(s1::Engine &engine, UiState &ui) {
 // ---------------------------------------------------------------------------
 
 static void drawSequencer(s1::Engine &engine, UiState &ui) {
+    // SEQ's knob cells are sized by their captions ("INTERVAL", "TEMPO x")
+    // rather than by the face, so the face can grow a long way before the
+    // block gets any wider and the arp row wraps off its single shelf.
+    KnobFloor bigKnobs(52.0f);
+
     BlockFlow flow;
 
     flow.begin("ARP", 90.0f, blockRowH());
@@ -458,12 +474,16 @@ static void drawSequencer(s1::Engine &engine, UiState &ui) {
     // The grid is 16 steps wide whatever else happens, so it gets its own
     // shelf and the width of the panel.
     const float gridW = ImGui::GetContentRegionAvail().x - kBlockPadX * 2.0f - 2.0f;
+    // The arp controls take one shelf, so the grid gets everything below it.
+    // Spend that on taller cells rather than leaving it blank.
+    const float rowH = ui.compact ? 52.0f : 0.0f;
+    const float cellRow = (rowH > 0.0f ? rowH : ImGui::GetFrameHeight()) +
+                          ImGui::GetStyle().ItemSpacing.y;
     // "STEP" caption, the beat-dot strip, then the transpose / 8va / on rows.
-    const float gridH = ImGui::GetTextLineHeightWithSpacing() + 13.0f +
-                        3.0f * ImGui::GetFrameHeightWithSpacing();
+    const float gridH = ImGui::GetTextLineHeightWithSpacing() + 13.0f + 3.0f * cellRow;
     flow.begin("16-STEP SEQUENCER", gridW, gridH);
     const int totalSteps = static_cast<int>(std::lround(engine.getParameter(arpTotalSteps)));
-    SequencerGrid(engine, totalSteps, ui.arpBeat);
+    SequencerGrid(engine, totalSteps, ui.arpBeat, rowH);
     flow.end();
 }
 

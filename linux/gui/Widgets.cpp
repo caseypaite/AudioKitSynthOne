@@ -541,9 +541,12 @@ bool TouchPadXY(const char *id, const ImVec2 &size, float &x, float &y, bool lat
     return changed;
 }
 
-bool SequencerGrid(s1::Engine &engine, int totalSteps, int currentStep) {
+bool SequencerGrid(s1::Engine &engine, int totalSteps, int currentStep, float rowHeight) {
     bool changed = false;
     const float cellWidth = 44.0f;
+    // 48 cells in a 16x3 grid are the hardest things on the panel to hit with a
+    // finger; a caller with height to spare passes a taller row.
+    const float rowH = rowHeight > 0.0f ? rowHeight : 0.0f;
 
     ImGui::BeginGroup();
     ImGui::TextColored(ImColor(color::kTextDim), "STEP");
@@ -566,6 +569,11 @@ bool SequencerGrid(s1::Engine &engine, int totalSteps, int currentStep) {
         const S1Parameter noteParam = static_cast<S1Parameter>(sequencerPattern00 + i);
         int transpose = static_cast<int>(std::lround(engine.getParameter(noteParam)));
         ImGui::SetNextItemWidth(cellWidth);
+        if (rowH > 0.0f) {
+            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
+                                ImVec2(ImGui::GetStyle().FramePadding.x,
+                                       (rowH - ImGui::GetTextLineHeight()) * 0.5f));
+        }
         if (ImGui::DragInt("##t", &transpose, 0.15f, -12, 12, "%+d")) {
             engine.setParameter(noteParam, static_cast<float>(transpose));
             changed = true;
@@ -573,12 +581,13 @@ bool SequencerGrid(s1::Engine &engine, int totalSteps, int currentStep) {
 
         // Octave boost
         const S1Parameter octParam = static_cast<S1Parameter>(sequencerOctBoost00 + i);
-        if (Toggle(engine, octParam, "8va", ImVec2(cellWidth, 0))) changed = true;
+        if (Toggle(engine, octParam, "8va", ImVec2(cellWidth, rowH))) changed = true;
 
         // Note on/off
         const S1Parameter onParam = static_cast<S1Parameter>(sequencerNoteOn00 + i);
-        if (Toggle(engine, onParam, "on", ImVec2(cellWidth, 0))) changed = true;
+        if (Toggle(engine, onParam, "on", ImVec2(cellWidth, rowH))) changed = true;
 
+        if (rowH > 0.0f) ImGui::PopStyleVar();
         ImGui::PopID();
         ImGui::EndGroup();
     }
