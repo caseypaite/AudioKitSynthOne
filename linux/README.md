@@ -178,6 +178,20 @@ configuration inside a desktop session before committing to it:
 synthone-gui --geometry 800x480      # exactly what the panel will show
 ```
 
+### Screenshots
+
+`tools/screenshots.sh` captures one still per panel and assembles the slideshow
+the top-level README shows. It runs the GUI on a throwaway X server sized to the
+target panel, so it needs no display of its own and the frame comes out exactly
+the panel's size:
+
+```sh
+./tools/screenshots.sh                      # -> ../screenshots/*.png + panels.gif
+./tools/screenshots.sh --geometry 1024x600  # a different panel
+```
+
+The stills are gitignored; `screenshots/panels.gif` is the tracked artefact.
+
 ### Designing for 800x480
 
 The official Raspberry Pi 7" display is **800x480**, under a third of the
@@ -349,5 +363,5 @@ linux/
   host/                 JACK + PortAudio backends, ALSA MIDI, CLI
   gui/                  Dear ImGui front end
   kiosk/                systemd unit, launcher and config for the Pi kiosk
-  tools/                synthone-offline
+  tools/                synthone-offline, tunings extractor, screenshot capture
 ```
