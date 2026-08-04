@@ -162,7 +162,7 @@ reinstalls:
 | --- | --- | --- |
 | `BACKEND` | `portaudio` | ALSA directly, nothing to start first. `jack` if you run a server. |
 | `GEOMETRY` | empty | Empty fills the panel; the official 7" display is `800x480`. |
-| `LAYOUT` | empty | `stacked` or `side`. On a 480px-tall panel try `side`. |
+| `LAYOUT` | empty | `single`, `stacked` or `side`. Empty lets the GUI choose -- see below. |
 | `TOP` / `BOTTOM` | empty | Panels: `MAIN ENV PAD FX SEQ TUNE`. |
 | `MIDI` | `all` | ALSA source as `CLIENT:PORT`, or everything. |
 | `HIDE_CURSOR` | `1` | Pointer off, for a touch panel. |
@@ -170,9 +170,40 @@ reinstalls:
 | `XSERVER_ARGS` | `-nolisten tcp -nocursor` | Passed to X. |
 | `EXTRA_ARGS` | empty | Anything else for `synthone-gui`. |
 
-The two GUI flags this relies on, `--fullscreen` and `--hide-cursor`, work on
-their own too, so you can try the kiosk configuration inside a desktop session
-before committing to it.
+The GUI flags this relies on -- `--fullscreen`, `--hide-cursor`, `--compact`
+and `--layout single` -- work on their own too, so you can try the kiosk
+configuration inside a desktop session before committing to it:
+
+```sh
+synthone-gui --geometry 800x480      # exactly what the panel will show
+```
+
+### Designing for 800x480
+
+The official Raspberry Pi 7" display is **800x480**, under a third of the
+pixels the roomy layout assumes. Below 1000x620 the GUI switches itself to a
+compact mode; `--compact` and `--no-compact` force the decision either way.
+
+What changes, and why:
+
+- **The header wraps to two rows.** Laid out in one row it measures 1175px --
+  387px wider than the whole panel -- and ImGui does not wrap a `SameLine`
+  run, so KEYBOARD, MIDI LEARN and the voice count simply fell off the right
+  edge, unreachable. Compact drops the wordmark, shortens the labels
+  (`KEYBOARD` to `KEYS`, `MIDI LEARN` to `LEARN`) and gives the preset button
+  whatever width is left over. Measured: 782px in an 800px viewport.
+- **One panel at a time,** as the iOS app does it, switched by its own tab
+  row. Two stacked panels leave 116px each at this height; a single panel gets
+  255px, which is three rows of knobs instead of one.
+- **Padding shrinks, controls do not.** Window padding, item spacing and the
+  keyboard bar (150px to 108px) all give up pixels. Knobs stay at 46px and
+  frame padding *grows* from 5px to 8px, so buttons get taller rather than
+  shorter -- a control you cannot hit with a fingertip is worse than one you
+  have to scroll to. Scrollbars widen from 12px to 16px for the same reason.
+
+None of this is Pi-specific: it keys off the framebuffer size, so a resized
+desktop window crosses the same threshold and a 1024x600 panel gets the same
+treatment with a roomier 375px panel.
 
 To take it off without removing the app:
 

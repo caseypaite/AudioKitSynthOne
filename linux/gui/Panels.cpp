@@ -395,12 +395,25 @@ void DrawPanel(Panel panel, s1::Engine &engine, UiState &ui) {
 void DrawHeader(s1::Engine &engine, UiState &ui) {
     ImGui::BeginGroup();
 
-    ImGui::PushStyleColor(ImGuiCol_Text, ImColor(color::kAccent).Value);
-    ImGui::Text("SYNTH ONE");
-    ImGui::PopStyleColor();
-    ImGui::SameLine(0.0f, 20.0f);
+    // Laid end to end the roomy header needs about 1200px. That is half again
+    // as wide as the Pi's 7" panel, and ImGui does not wrap a SameLine run, so
+    // on a narrow display it would simply run off the right edge taking the
+    // keyboard and MIDI-learn toggles with it. Compact splits it over two rows,
+    // drops the wordmark, shortens the labels and lets the preset button take
+    // whatever width is left.
+    const bool wide = !ui.compact;
+    const float gapBig = wide ? 20.0f : 8.0f;
+    const float gapSmall = wide ? 10.0f : 6.0f;
+    const float stepW = wide ? 30.0f : 34.0f;   // touch: no smaller when compact
 
-    if (ImGui::Button("<", ImVec2(30, 0))) {
+    if (wide) {
+        ImGui::PushStyleColor(ImGuiCol_Text, ImColor(color::kAccent).Value);
+        ImGui::Text("SYNTH ONE");
+        ImGui::PopStyleColor();
+        ImGui::SameLine(0.0f, gapBig);
+    }
+
+    if (ImGui::Button("<", ImVec2(stepW, 0))) {
         const auto presets = engine.presetsInBank(ui.currentBank);
         if (!presets.empty()) {
             int index = 0;
@@ -421,11 +434,17 @@ void DrawHeader(s1::Engine &engine, UiState &ui) {
     char label[128];
     std::snprintf(label, sizeof(label), "%d: %s", ui.currentPreset,
                   ui.currentPresetName.empty() ? "(init)" : ui.currentPresetName.c_str());
-    if (ImGui::Button(label, ImVec2(320, 0))) ui.showPresets = !ui.showPresets;
+    // Compact gives the preset name whatever is left after the two step
+    // buttons, so it stays readable at any width instead of being cut off.
+    const float presetW =
+        wide ? 320.0f
+             : std::max(120.0f, ImGui::GetContentRegionAvail().x - stepW -
+                                    ImGui::GetStyle().ItemSpacing.x * 2.0f);
+    if (ImGui::Button(label, ImVec2(presetW, 0))) ui.showPresets = !ui.showPresets;
     ImGui::PopStyleColor();
     ImGui::SameLine();
 
-    if (ImGui::Button(">", ImVec2(30, 0))) {
+    if (ImGui::Button(">", ImVec2(stepW, 0))) {
         const auto presets = engine.presetsInBank(ui.currentBank);
         if (!presets.empty()) {
             int index = 0;
@@ -441,12 +460,15 @@ void DrawHeader(s1::Engine &engine, UiState &ui) {
         }
     }
 
-    ImGui::SameLine(0.0f, 20.0f);
-    if (ImGui::Button(ui.showPresets ? "CLOSE PRESETS" : "PRESETS", ImVec2(130, 0))) {
+    // Compact starts a second row here instead of continuing off the edge.
+    if (wide) ImGui::SameLine(0.0f, gapBig);
+
+    if (ImGui::Button(ui.showPresets ? (wide ? "CLOSE PRESETS" : "CLOSE") : "PRESETS",
+                      ImVec2(wide ? 130.0f : 92.0f, 0))) {
         ui.showPresets = !ui.showPresets;
     }
-    ImGui::SameLine(0.0f, 10.0f);
-    if (ImGui::Button("SAVE", ImVec2(80, 0))) {
+    ImGui::SameLine(0.0f, gapSmall);
+    if (ImGui::Button("SAVE", ImVec2(wide ? 80.0f : 64.0f, 0))) {
         std::snprintf(ui.saveName, sizeof(ui.saveName), "%s",
                       ui.currentPresetName.empty() ? "New Preset" : ui.currentPresetName.c_str());
         // Default to the next free slot in the User bank.
@@ -456,28 +478,39 @@ void DrawHeader(s1::Engine &engine, UiState &ui) {
         ui.showSaveDialog = true;
     }
 
-    ImGui::SameLine(0.0f, 10.0f);
-    if (ImGui::Button(ui.sideBySide ? "LAYOUT: SIDE" : "LAYOUT: STACK", ImVec2(130, 0))) {
-        ui.sideBySide = !ui.sideBySide;
+    // One button cycles the three layouts: one panel, two stacked, two side by
+    // side. Single is the only one that leaves a panel usable on a short
+    // display, so it is where compact starts.
+    ImGui::SameLine(0.0f, gapSmall);
+    const char *layoutLabel = ui.singlePanel  ? (wide ? "LAYOUT: SINGLE" : "1 PANEL")
+                              : ui.sideBySide ? (wide ? "LAYOUT: SIDE" : "SIDE")
+                                              : (wide ? "LAYOUT: STACK" : "STACK");
+    if (ImGui::Button(layoutLabel, ImVec2(wide ? 130.0f : 84.0f, 0))) {
+        if (ui.singlePanel) { ui.singlePanel = false; ui.sideBySide = false; }
+        else if (!ui.sideBySide) { ui.sideBySide = true; }
+        else { ui.singlePanel = true; ui.sideBySide = false; }
     }
     if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("stacked = panels top/bottom; side = split by a vertical divider");
+        ImGui::SetTooltip("single = one panel at a time; stacked = top/bottom; "
+                          "side = split by a vertical divider");
     }
 
-    ImGui::SameLine(0.0f, 10.0f);
-    ToggleValue(ui.showKeyboard, "KEYBOARD", ImVec2(100, 0));
+    ImGui::SameLine(0.0f, gapSmall);
+    ToggleValue(ui.showKeyboard, wide ? "KEYBOARD" : "KEYS", ImVec2(wide ? 100.0f : 64.0f, 0));
 
-    ImGui::SameLine(0.0f, 10.0f);
+    ImGui::SameLine(0.0f, gapSmall);
     const bool wasLearn = ui.midiLearnMode;
-    ToggleValue(ui.midiLearnMode, "MIDI LEARN", ImVec2(120, 0));
+    ToggleValue(ui.midiLearnMode, wide ? "MIDI LEARN" : "LEARN", ImVec2(wide ? 120.0f : 76.0f, 0));
     if (wasLearn && !ui.midiLearnMode) {
         engine.armMidiLearn(S1ParameterCount); // disarm on leaving learn mode
     }
 
-    ImGui::SameLine(0.0f, 20.0f);
-    ImGui::TextColored(ImColor(color::kTextDim), "voices %d", ui.voiceCount);
+    ImGui::SameLine(0.0f, gapBig);
+    ImGui::TextColored(ImColor(color::kTextDim), wide ? "voices %d" : "%d", ui.voiceCount);
+    // Status text is transient and variable-length. Compact gives it its own
+    // line rather than letting it push the row past the edge.
     if (ui.midiLearnMode) {
-        ImGui::SameLine(0.0f, 12.0f);
+        if (wide) ImGui::SameLine(0.0f, 12.0f);
         if (engine.midiLearnArmed()) {
             ImGui::TextColored(ImColor(color::kLED), "move a CC to bind '%s'",
                                engine.parameterName(engine.midiLearnTarget()).c_str());
@@ -486,7 +519,7 @@ void DrawHeader(s1::Engine &engine, UiState &ui) {
         }
     }
     if (!ui.message.empty()) {
-        ImGui::SameLine(0.0f, 20.0f);
+        if (wide || !ui.midiLearnMode) ImGui::SameLine(0.0f, wide ? 20.0f : 8.0f);
         ImGui::TextColored(ImColor(color::kAccent), "%s", ui.message.c_str());
     }
 

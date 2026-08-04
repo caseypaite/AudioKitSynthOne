@@ -49,7 +49,10 @@ no audio hardware at all, handy for testing).
 
 The GUI is a **rebuild, not a port** — Dear ImGui rather than the original
 PaintCode vector artwork — so it covers all six panels but does not look like
-the iOS app.
+the iOS app. It lays itself out for the target display: the official Pi 7"
+panel is 800x480, so below 1000x620 the GUI switches to a two-row header, one
+panel at a time, and tighter padding — while keeping knobs and buttons at
+finger size.
 
 The boot-to-synth setup is in place: `sudo ./install.sh --kiosk` installs a
 systemd service that brings up a bare X server on tty1 with the synth as its

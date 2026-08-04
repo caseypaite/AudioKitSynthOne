@@ -49,6 +49,21 @@ private:
     s1gui::UiState &mUi;
 };
 
+/// Chrome density. The official Raspberry Pi 7" panel is 800x480, which is
+/// less than a third of the pixels the roomy layout was drawn for, so on a
+/// small display every spare pixel is taken out of padding and spacing.
+///
+/// Frame padding is the exception: it sets how tall a button is, and a control
+/// you cannot hit with a fingertip is worse than one you have to scroll to. It
+/// goes *up* in compact mode, not down.
+void applySpacing(bool compact) {
+    ImGuiStyle &style = ImGui::GetStyle();
+    style.WindowPadding = compact ? ImVec2(6, 5)  : ImVec2(12, 10);
+    style.FramePadding  = compact ? ImVec2(6, 8)  : ImVec2(8, 5);
+    style.ItemSpacing   = compact ? ImVec2(6, 4)  : ImVec2(8, 7);
+    style.ScrollbarSize = compact ? 16.0f : 12.0f;  // a touch-draggable bar
+}
+
 void applyDarkStyle() {
     ImGuiStyle &style = ImGui::GetStyle();
     style.WindowRounding = 0.0f;
@@ -138,6 +153,7 @@ int main(int argc, char **argv) {
     bool fullscreen = false;
     bool hideCursor = false;
     bool geometryGiven = false;
+    int  compactMode = -1;   // -1 = decide from the display, 0 = off, 1 = on
     std::string topPanelName, bottomPanelName, layoutName;
 
     auto panelByName = [](const std::string &name, s1gui::Panel &out) {
@@ -161,6 +177,8 @@ int main(int argc, char **argv) {
         else if (arg == "--top") topPanelName = next();
         else if (arg == "--bottom") bottomPanelName = next();
         else if (arg == "--layout") layoutName = next();
+        else if (arg == "--compact") compactMode = 1;
+        else if (arg == "--no-compact") compactMode = 0;
         else if (arg == "--geometry") {
             const std::string g = next();
             const size_t x = g.find('x');
@@ -175,9 +193,12 @@ int main(int argc, char **argv) {
             std::printf("usage: synthone-gui [--backend jack|portaudio] [--resources DIR]\n"
                         "                    [--midi CLIENT:PORT|all] [--geometry WxH]\n"
                         "                    [--top PANEL] [--bottom PANEL]\n"
-                        "                    [--layout stacked|side]\n"
+                        "                    [--layout single|stacked|side]\n"
                         "                    [--fullscreen] [--hide-cursor]\n"
-                        "  PANEL: MAIN ENV PAD FX SEQ TUNE\n");
+                        "                    [--compact | --no-compact]\n"
+                        "  PANEL: MAIN ENV PAD FX SEQ TUNE\n"
+                        "  compact is chosen automatically on a display under\n"
+                        "  1000x620, such as the Raspberry Pi 7\" panel (800x480)\n");
             return 0;
         }
     }
@@ -214,8 +235,10 @@ int main(int argc, char **argv) {
     s1gui::UiState ui;
     if (!topPanelName.empty()) panelByName(topPanelName, ui.topPanel);
     if (!bottomPanelName.empty()) panelByName(bottomPanelName, ui.bottomPanel);
-    if (layoutName == "side" || layoutName == "side-by-side") ui.sideBySide = true;
-    else if (layoutName == "stacked" || layoutName == "stack") ui.sideBySide = false;
+    if (layoutName == "side" || layoutName == "side-by-side") { ui.sideBySide = true; ui.singlePanel = false; }
+    else if (layoutName == "stacked" || layoutName == "stack") { ui.sideBySide = false; ui.singlePanel = false; }
+    else if (layoutName == "single" || layoutName == "one") ui.singlePanel = true;
+    const bool layoutChosen = !layoutName.empty();
     if (ui.topPanel == ui.bottomPanel) {
         // Never start with the same panel in both slots.
         ui.bottomPanel = static_cast<s1gui::Panel>(
@@ -325,6 +348,23 @@ int main(int argc, char **argv) {
         if (!ui.message.empty() && ImGui::GetTime() - ui.messageTime > 3.0) ui.message.clear();
 
         const ImGuiViewport *viewport = ImGui::GetMainViewport();
+
+        // Decide the density from what we are actually drawing on, so the same
+        // binary suits a desktop window and the Pi's 800x480 panel, and adapts
+        // if the window is resized. 1000x620 sits above 800x480 and below the
+        // smallest roomy layout that still works.
+        const bool wantCompact = (compactMode >= 0)
+                                     ? (compactMode == 1)
+                                     : (viewport->WorkSize.x < 1000.0f || viewport->WorkSize.y < 620.0f);
+        if (wantCompact != ui.compact) {
+            ui.compact = wantCompact;
+            applySpacing(ui.compact);
+            // Two panels cannot both stay usable on a short display: each would
+            // get about 110px. Fall back to one, unless the user asked for a
+            // specific layout on the command line.
+            if (!layoutChosen) ui.singlePanel = ui.compact;
+        }
+
         ImGui::SetNextWindowPos(viewport->WorkPos);
         ImGui::SetNextWindowSize(viewport->WorkSize);
         ImGui::Begin("SynthOne", nullptr,
@@ -338,7 +378,10 @@ int main(int argc, char **argv) {
         if (ui.showPresets) {
             s1gui::DrawPresetBrowser(engine, ui);
         } else {
-            const float keyboardHeight = ui.showKeyboard ? 150.0f : 0.0f;
+            // The keyboard bar is a wheel column (74px slider plus its caption)
+            // beside the keys, so it packs down to ~108px before anything is
+            // clipped. 150px is comfort, not a requirement.
+            const float keyboardHeight = ui.showKeyboard ? (ui.compact ? 108.0f : 150.0f) : 0.0f;
             const float bodyHeight = ImGui::GetContentRegionAvail().y - keyboardHeight;
 
             auto drawSlot = [&](const char *childId, s1gui::Panel panel, const ImVec2 &size) {
@@ -349,7 +392,17 @@ int main(int argc, char **argv) {
                 ImGui::PopStyleColor();
             };
 
-            if (ui.sideBySide) {
+            if (ui.singlePanel) {
+                // One panel filling the body, switched by its own tab row --
+                // the way the iOS app presents a panel at a time. Nothing is
+                // "opposite", so pass a scratch panel the tabs can write to.
+                s1gui::Panel unused = s1gui::Panel::Count;
+                panelTabs("single", "PANEL", ui.topPanel, unused);
+                // Measure after the tabs rather than guessing their height, so
+                // the panel ends exactly where the keyboard bar begins.
+                const float remaining = ImGui::GetContentRegionAvail().y - keyboardHeight - 4.0f;
+                drawSlot("toppanel", ui.topPanel, ImVec2(0, remaining));
+            } else if (ui.sideBySide) {
                 // Split by a vertical divider: the two panels sit left and right,
                 // each full height. Panels are laid out wide, so each one scrolls
                 // horizontally inside its own pane at this width.
