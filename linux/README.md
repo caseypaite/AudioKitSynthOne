@@ -178,6 +178,12 @@ configuration inside a desktop session before committing to it:
 synthone-gui --geometry 800x480      # exactly what the panel will show
 ```
 
+To take the kiosk off without removing the app:
+
+```sh
+sudo systemctl disable --now synthone-kiosk
+```
+
 ### Screenshots
 
 `tools/screenshots.sh` captures one still per panel and assembles the slideshow
@@ -207,23 +213,70 @@ What changes, and why:
   (`KEYBOARD` to `KEYS`, `MIDI LEARN` to `LEARN`) and gives the preset button
   whatever width is left over. Measured: 782px in an 800px viewport.
 - **One panel at a time,** as the iOS app does it, switched by its own tab
-  row. Two stacked panels leave 116px each at this height; a single panel gets
-  255px, which is three rows of knobs instead of one.
-- **Padding shrinks, controls do not.** Window padding, item spacing and the
-  keyboard bar (150px to 108px) all give up pixels. Knobs stay at 46px and
-  frame padding *grows* from 5px to 8px, so buttons get taller rather than
-  shorter -- a control you cannot hit with a fingertip is worse than one you
-  have to scroll to. Scrollbars widen from 12px to 16px for the same reason.
+  row. Two stacked panels leave about 116px each at this height, which is not
+  enough for a single row of knobs; one panel with the keyboard hidden gets
+  ~367px.
+- **The on-screen keyboard starts hidden,** and shrinks from 150px to 108px
+  when you bring it back with KEYS. A box driven by a MIDI controller does not
+  need it, and it costs a quarter of the height.
+- **Chrome gives up pixels, touch targets do not.** Window padding goes
+  12x10 to 6x5, item spacing 8x7 to 6x3 -- but frame padding *grows*, 8x5 to
+  6x7, so buttons get taller rather than shorter, and scrollbars widen from
+  12px to 16px. A control you cannot hit with a fingertip is worse than one you
+  have to scroll to.
 
 None of this is Pi-specific: it keys off the framebuffer size, so a resized
 desktop window crosses the same threshold and a 1024x600 panel gets the same
-treatment with a roomier 375px panel.
+treatment with more room to spend.
 
-To take it off without removing the app:
+### Blocks, not rows
 
-```sh
-sudo systemctl disable --now synthone-kiosk
-```
+A full-width row per section wastes whatever the widest row does not use, and
+that leftover repeats on every row. Instead each functional group is a
+self-contained **block** sized to its own contents, and `BlockFlow`
+(`gui/Panels.cpp`) packs blocks left to right, wrapping to a new shelf when the
+next one will not fit.
+
+Blocks fill both dimensions: a 2x2 stack of toggles sits beside a row of knobs
+beside a stepper. MAIN is ten blocks on three shelves; SEQ fits all six
+arpeggiator controls on one; FX holds nine blocks in four. Each block keeps its
+own heading and border, so the grouping by function is more explicit than
+headings stacked down the page.
+
+Because the flow keys off available width, the same code packs FX into four
+shelves at 800x480 and two at 1440x900.
+
+Two rules worth knowing before adding a control:
+
+- **Blocks never scroll.** A scrollbar inside one would steal width from the
+  contents and truncate the captions, so they are created with
+  `NoScrollbar`. A block whose declared height is too small silently clips
+  instead -- if something disappears, the size passed to `flow.begin()` is
+  wrong, not the layout.
+- **Declare sizes with the helpers.** `kw(label)` and `kwRow({...})` mirror
+  `Knob()`'s own width formula, which widens a cell when its caption is wider
+  than the face. Measuring with a bare knob width under-counts a row and
+  pushes it off the shelf.
+
+### Knob sizes per panel
+
+Compact scales knob faces to 70% and floors them at 32px, which is what lets
+the busiest panel fit. Panels that finish above the fold have no reason to pay
+that price, so each raises the floor for its own controls with a scoped
+`s1gui::KnobFloor`:
+
+| Panel | Face | Why |
+| --- | --- | --- |
+| MAIN | 72px | Ten blocks, three shelves, ~95% of the height. |
+| ENV | 72px | Ten controls; the curve editors grow to 112px with them. |
+| TUNE | 64px | Three knobs, finishes well clear of the fold. |
+| SEQ | 52px | Cells are sized by their captions (`INTERVAL`, `TEMPO x`), so the face grows this far before the block widens and the arp row wraps. |
+| FX | 32px | **At capacity.** Thirty-odd controls in four shelves, clearing the fold by ~10px. Measured: even a 36px face costs 12px across its three knob shelves and brings the scrollbar back. |
+| PAD | -- | No knobs; the two XY pads take the full width and height instead. |
+
+Raising one is a matter of trying it and looking: a bigger face widens the
+block as well as heightening it, so it can reflow a shelf and cost more than it
+gains. `tools/screenshots.sh` is the quickest way to check.
 
 ### Where presets live
 
