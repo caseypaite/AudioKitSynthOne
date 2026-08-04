@@ -26,7 +26,14 @@ public:
 
     /// Connect to the audio server and negotiate the stream format. On success
     /// sampleRate() and bufferFrames() are valid.
-    virtual bool open(double requestedRate, uint32_t requestedFrames, std::string &error) = 0;
+    ///
+    /// `requestedLatencySec` is the output latency to aim for; 0 means "derive
+    /// it from the buffer size". It matters more than it looks: PortAudio
+    /// treats the latency hint as the real request and the buffer size as
+    /// advisory, so passing a device default there makes the buffer size have
+    /// no effect on latency at all. JACK dictates its own and ignores this.
+    virtual bool open(double requestedRate, uint32_t requestedFrames,
+                      double requestedLatencySec, std::string &error) = 0;
 
     /// Begin calling `render` on the realtime thread.
     virtual bool start(RenderCallback render, std::string &error) = 0;

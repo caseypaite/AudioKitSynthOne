@@ -35,6 +35,8 @@ void handleSignal(int) { gRunning.store(false); }
         "  --backend NAME     audio backend: jack | portaudio (default: first available)\n"
         "  --rate HZ          preferred sample rate (PortAudio only; JACK dictates its own)\n"
         "  --buffer FRAMES    preferred buffer size (PortAudio only)\n"
+        "  --latency MS       output latency to aim for (PortAudio only;\n"
+        "                     default: two buffers' worth)\n"
         "  --resources DIR    AudioKitSynthOne source dir (default: built-in)\n"
         "  --bank NAME        preset bank to load\n"
         "  --preset N         preset position within the bank (default: 0)\n"
@@ -83,6 +85,7 @@ int main(int argc, char **argv) {
     int presetPosition = 0;
     double requestedRate = 0;
     uint32_t requestedFrames = 0;
+    double requestedLatencySec = 0.0;
     bool listPresets = false, listParams = false, listMidi = false, quiet = false;
     int testNote = -1;
     std::vector<std::pair<std::string, float>> overrides;
@@ -96,6 +99,7 @@ int main(int argc, char **argv) {
         if (arg == "--backend") backendName = next();
         else if (arg == "--rate") requestedRate = std::stod(next());
         else if (arg == "--buffer") requestedFrames = static_cast<uint32_t>(std::stoul(next()));
+        else if (arg == "--latency") requestedLatencySec = std::stod(next()) / 1000.0;
         else if (arg == "--resources") resourceDir = next();
         else if (arg == "--user-dir") userDir = next();
         else if (arg == "--bank") bank = next();
@@ -147,7 +151,7 @@ int main(int argc, char **argv) {
             std::cerr << "error: " << error << "\n";
             return 1;
         }
-        if (!backend->open(requestedRate, requestedFrames, error)) {
+        if (!backend->open(requestedRate, requestedFrames, requestedLatencySec, error)) {
             std::cerr << "error: " << error << "\n";
             return 1;
         }

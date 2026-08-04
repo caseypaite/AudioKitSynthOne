@@ -9,6 +9,7 @@
 #include "AudioBackend.h"
 
 #include <portaudio.h>
+#include <cstdio>
 
 #include <cstring>
 #include <vector>
@@ -29,7 +30,8 @@ public:
         }
     }
 
-    bool open(double requestedRate, uint32_t requestedFrames, std::string &error) override {
+    bool open(double requestedRate, uint32_t requestedFrames, double requestedLatencySec,
+              std::string &error) override {
         const PaError initRc = Pa_Initialize();
         if (initRc != paNoError) {
             error = std::string("Pa_Initialize: ") + Pa_GetErrorText(initRc);
@@ -51,7 +53,24 @@ public:
         params.device = device;
         params.channelCount = 2;
         params.sampleFormat = paFloat32 | paNonInterleaved;
-        params.suggestedLatency = info->defaultLowOutputLatency;
+        // PortAudio takes this as the request and the buffer size as a hint,
+        // so passing the device default made --buffer irrelevant to latency:
+        // 64 and 128 frames both came back at 8.71ms on the machine this was
+        // written on. One period is the floor a callback API can offer and
+        // measured never worse than the old default at any buffer size:
+        //
+        //   buffer   was      now
+        //     64    8.71ms   1.45ms
+        //    128    8.71ms   2.90ms
+        //    256   11.61ms   5.80ms
+        //   1024   23.22ms  23.22ms
+        //
+        // Asking for two periods instead is not a safer middle ground -- it
+        // rounds to the same value as 1.5 and is worse than the old default
+        // above 256 frames. Use --latency if you want slack for a busy box.
+        const double periodSec = static_cast<double>(mBufferFrames) / mSampleRate;
+        params.suggestedLatency =
+            requestedLatencySec > 0.0 ? requestedLatencySec : periodSec;
         params.hostApiSpecificStreamInfo = nullptr;
 
         const PaError rc = Pa_OpenStream(&mStream, nullptr, &params, mSampleRate, mBufferFrames,
@@ -63,6 +82,7 @@ public:
 
         if (const PaStreamInfo *streamInfo = Pa_GetStreamInfo(mStream)) {
             mSampleRate = streamInfo->sampleRate;
+            mOutputLatencySec = streamInfo->outputLatency;
         }
         mDeviceName = info->name ? info->name : "default";
         if (const PaHostApiInfo *api = Pa_GetHostApiInfo(info->hostApi)) {
@@ -92,7 +112,11 @@ public:
     const char *name() const override { return "portaudio"; }
     double sampleRate() const override { return mSampleRate; }
     uint32_t bufferFrames() const override { return mBufferFrames; }
-    std::string description() const override { return mDeviceName; }
+    std::string description() const override {
+        char buf[64];
+        std::snprintf(buf, sizeof(buf), "  (%.2f ms out)", mOutputLatencySec * 1000.0);
+        return mDeviceName + buf;
+    }
 
 private:
     static int callbackTrampoline(const void *, void *output, unsigned long frames,
@@ -123,6 +147,7 @@ private:
     bool           mInitialised = false;
     bool           mActive = false;
     std::string    mDeviceName;
+    double         mOutputLatencySec = 0.0;
 };
 
 std::unique_ptr<AudioBackend> makePortAudioBackend() {

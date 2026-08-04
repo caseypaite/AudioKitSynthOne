@@ -71,7 +71,24 @@ Two binaries are produced:
 
 `--backend` selects `jack` or `portaudio` at runtime; both are compiled in when
 their libraries are present. JACK dictates its own sample rate and buffer size,
-so `--rate`/`--buffer` apply to PortAudio only. MIDI arrives on an ALSA
+so `--rate`/`--buffer`/`--latency` apply to PortAudio only.
+
+On PortAudio the output latency follows `--buffer` -- one period, which is the
+floor a callback API can offer:
+
+| `--buffer` | output latency |
+| --- | --- |
+| 64 | 1.45 ms |
+| 128 | 2.90 ms |
+| 256 | 5.80 ms |
+| 512 | 11.61 ms |
+
+(measured at 44.1 kHz; the status line reports the figure the device actually
+granted). `--latency MS` asks for more slack if a busy machine underruns. To
+that, add up to one buffer of MIDI quantisation: events are applied at the top
+of the render callback, so a note waits for the next period boundary. The
+engine itself adds nothing -- a note-on is audible in the first sample of the
+block it lands in. MIDI arrives on an ALSA
 sequencer port (`--midi CLIENT:PORT`, or `all`, the default).
 
 Rendering without hardware:

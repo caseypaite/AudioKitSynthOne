@@ -24,7 +24,9 @@ public:
         }
     }
 
-    bool open(double requestedRate, uint32_t requestedFrames, std::string &error) override {
+    bool open(double requestedRate, uint32_t requestedFrames, double /*latency*/,
+              std::string &error) override {
+        // JACK dictates both the period and the latency; --latency is a no-op here.
         // JACK dictates both; the requests are advisory only.
         (void)requestedRate;
         (void)requestedFrames;

@@ -212,7 +212,7 @@ int main(int argc, char **argv) {
 
     std::string error;
     auto backend = s1::makeBackend(backendName, error);
-    if (!backend || !backend->open(0, 0, error)) {
+    if (!backend || !backend->open(0, 0, 0.0, error)) {
         std::fprintf(stderr, "error: %s\n", error.c_str());
         return 1;
     }
