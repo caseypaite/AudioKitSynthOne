@@ -5,6 +5,72 @@
 [![Crowdin](https://d322cqt584bo4o.cloudfront.net/audiokit-synth-one/localized.svg)](https://crowdin.com/project/audiokit-synth-one)
 [![Twitter Follow](https://img.shields.io/twitter/follow/AudioKitPro.svg?style=social)](http://twitter.com/AudioKitPro)
 
+---
+
+## About this fork: a Linux / Raspberry Pi port
+
+This fork adds a native Linux build of Synth One under [`linux/`](linux/). The
+original app is iOS-only and needs macOS and Xcode to compile; this port
+compiles the original C++/Objective-C++ DSP sources in place against a
+compatibility layer that stands in for AudioKit, CoreAudio and
+TheAmazingAudioEngine, and hosts them on JACK or PortAudio with ALSA sequencer
+MIDI. The synthesis engine is the real thing — the same kernel, note state and
+preset banks — not a reimplementation.
+
+**The port was written with [Claude](https://claude.ai), using Anthropic's
+Claude Code.** That includes the compatibility layer, the JACK/PortAudio/ALSA
+host, the Dear ImGui front end, and the tooling.
+
+### Why: a standalone Raspberry Pi synth
+
+The end goal is a self-contained hardware synthesizer — a Raspberry Pi with a
+7-inch touch display that boots straight into Synth One. No desktop, no window
+manager, no launcher: the app comes up on startup and owns the screen, so all
+the Pi's modest CPU and memory go to audio rather than to a desktop environment.
+That is what the deliberately lightweight stack is for.
+
+### How it is built
+
+Day-to-day development happens on an **x86_64** workstation, where the build is
+fast and JACK, ALSA and a normal display are available. ARM64 binaries for the
+Pi are produced from that same machine by
+[`linux/build-arm64.sh`](linux/build-arm64.sh), which builds inside an `arm64`
+container under qemu emulation and can package the result:
+
+```bash
+cd linux
+cmake -S . -B build -G Ninja && cmake --build build   # native x86_64
+./build-arm64.sh --package                            # aarch64 build + dist/ zip
+```
+
+Three binaries come out: `synthone-gui` (touch-friendly Dear ImGui front end),
+`synthone` (headless, MIDI-driven), and `synthone-offline` (renders a WAV with
+no audio hardware at all, handy for testing).
+
+The GUI is a **rebuild, not a port** — Dear ImGui rather than the original
+PaintCode vector artwork — so it covers all six panels but does not look like
+the iOS app.
+
+See [`linux/README.md`](linux/README.md) for the full design, dependencies and
+current status. Status in short: the engine, both hosts, the GUI and the ARM64
+packaging work; the boot-to-app kiosk integration on the Pi is the next step,
+not something the install script does yet.
+
+### On the state of upstream
+
+This port exists partly because upstream development appears to have stopped.
+The last commit to AudioKit/AudioKitSynthOne landed in **March 2022**, and only
+two commits landed that year — substantive work wound down in 2019. The app is
+still excellent and the code is still a pleasure to read; it has simply been
+sitting still for over four years. Bringing it to Linux and to inexpensive
+hardware seemed a better fate than letting it bit-rot behind an aging iOS
+toolchain.
+
+None of this is affiliated with or endorsed by AudioKit or AudioKit Pro, LLC.
+The original README follows.
+
+---
+
 We've open-sourced the code for this synthesizer so that everyone is able to make changes to the code,
 introduce new features, fix bugs, improve efficiency, and keep the synthesizer up-to-date with all
 new capabilities of the base operating system. Synth One is now Universal for iPhone/iPad!  
@@ -72,6 +138,7 @@ any hints about what could be improved.
 ### This folder's contents
 
 * `AudioKitSynthOne/` - This folder contains most of the source code
+* `linux/` - The Linux / Raspberry Pi port: compatibility layer, JACK/PortAudio host, Dear ImGui front end and build tooling (see [its README](linux/README.md))
 * `AudioKitSynthOne.xcodeproj` - This file is a part of the workspace, which you should open instead
 * `AudioKitSynthOne.xcworkspace` - This is the file you should open with Xcode, it contains reference to both the project files for the synth code and associated Pods
 * `OneSignalNotificationServiceExtension/` - code for a third party extension we use
