@@ -185,6 +185,12 @@ const char *PanelName(Panel panel) {
 // ---------------------------------------------------------------------------
 
 static void drawGenerators(s1::Engine &engine, UiState &) {
+    // MAIN is the panel you actually play with, and at 800x480 it was using
+    // about three quarters of the width and two thirds of the height. Bigger
+    // faces spend both: wider blocks pack the shelves fuller, taller cells use
+    // the space under them.
+    KnobFloor bigKnobs(72.0f);
+
     BlockFlow flow;
 
     flow.begin("OSC 1", kwRow({"MORPH 1", "SEMI 1", "VOL 1"}), blockRowH());
@@ -235,19 +241,24 @@ static void drawGenerators(s1::Engine &engine, UiState &) {
     Knob(engine, {glide,        "GLIDE",  2.0f, Units::Seconds});
     flow.end();
 
-    flow.begin("VOICE", 64.0f + kBlockGap + 74.0f, blockRowH());
+    // The last shelf holds only three blocks and had about 290px going spare.
+    // Spend it on the targets rather than leaving it blank: these toggles and
+    // the tempo stepper are the widgets you poke rather than twist, and they
+    // were the smallest things on the panel.
+    const float voiceW = 96.0f;
+    flow.begin("VOICE", voiceW * 2.0f + kBlockGap, blockRowH());
     ImGui::BeginGroup();
-    Toggle(engine, isMono,       "MONO",   ImVec2(64, 0));
-    Toggle(engine, monoIsLegato, "LEGATO", ImVec2(64, 0));
+    Toggle(engine, isMono,       "MONO",   ImVec2(voiceW, 0));
+    Toggle(engine, monoIsLegato, "LEGATO", ImVec2(voiceW, 0));
     ImGui::EndGroup(); ImGui::SameLine(0.0f, kBlockGap);
     ImGui::BeginGroup();
-    Toggle(engine, widen,              "WIDEN",   ImVec2(74, 0));
-    Toggle(engine, oscBandlimitEnable, "BANDLIM", ImVec2(74, 0));
+    Toggle(engine, widen,              "WIDEN",   ImVec2(voiceW, 0));
+    Toggle(engine, oscBandlimitEnable, "BANDLIM", ImVec2(voiceW, 0));
     ImGui::EndGroup();
     flow.end();
 
-    flow.begin("TEMPO (BPM)", 130.0f, blockRowH());
-    Stepper(engine, arpRate, "", 130.0f);
+    flow.begin("TEMPO (BPM)", 240.0f, blockRowH());
+    Stepper(engine, arpRate, "", 240.0f);
     flow.end();
 }
 
