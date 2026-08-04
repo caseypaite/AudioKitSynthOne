@@ -135,6 +135,9 @@ int main(int argc, char **argv) {
     std::string midiSpec = "all";
     std::string tuningsPath = S1_TUNINGS_JSON;
     int windowWidth = 1440, windowHeight = 900;
+    bool fullscreen = false;
+    bool hideCursor = false;
+    bool geometryGiven = false;
     std::string topPanelName, bottomPanelName, layoutName;
 
     auto panelByName = [](const std::string &name, s1gui::Panel &out) {
@@ -164,12 +167,16 @@ int main(int argc, char **argv) {
             if (x != std::string::npos) {
                 windowWidth = std::atoi(g.substr(0, x).c_str());
                 windowHeight = std::atoi(g.substr(x + 1).c_str());
+                geometryGiven = true;
             }
-        } else if (arg == "-h" || arg == "--help") {
+        } else if (arg == "--fullscreen") fullscreen = true;
+        else if (arg == "--hide-cursor") hideCursor = true;
+        else if (arg == "-h" || arg == "--help") {
             std::printf("usage: synthone-gui [--backend jack|portaudio] [--resources DIR]\n"
                         "                    [--midi CLIENT:PORT|all] [--geometry WxH]\n"
                         "                    [--top PANEL] [--bottom PANEL]\n"
                         "                    [--layout stacked|side]\n"
+                        "                    [--fullscreen] [--hide-cursor]\n"
                         "  PANEL: MAIN ENV PAD FX SEQ TUNE\n");
             return 0;
         }
@@ -263,8 +270,28 @@ int main(int argc, char **argv) {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 2);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
+    // Kiosk mode: take the primary monitor at its current resolution unless a
+    // --geometry was asked for. On the Pi's 7" panel that is 800x480, and with
+    // no window manager running there is nothing else to yield the screen to.
+    GLFWmonitor *monitor = nullptr;
+    if (fullscreen) {
+        monitor = glfwGetPrimaryMonitor();
+        if (monitor == nullptr) {
+            std::fprintf(stderr, "warning: no monitor reported; staying windowed\n");
+        } else if (const GLFWvidmode *mode = glfwGetVideoMode(monitor)) {
+            if (!geometryGiven) {
+                windowWidth = mode->width;
+                windowHeight = mode->height;
+            }
+            glfwWindowHint(GLFW_RED_BITS, mode->redBits);
+            glfwWindowHint(GLFW_GREEN_BITS, mode->greenBits);
+            glfwWindowHint(GLFW_BLUE_BITS, mode->blueBits);
+            glfwWindowHint(GLFW_REFRESH_RATE, mode->refreshRate);
+        }
+    }
+
     GLFWwindow *window =
-        glfwCreateWindow(windowWidth, windowHeight, "AudioKit Synth One", nullptr, nullptr);
+        glfwCreateWindow(windowWidth, windowHeight, "AudioKit Synth One", monitor, nullptr);
     if (window == nullptr) {
         std::fprintf(stderr, "error: cannot create a window\n");
         glfwTerminate();
@@ -272,6 +299,11 @@ int main(int argc, char **argv) {
     }
     glfwMakeContextCurrent(window);
     glfwSwapInterval(1);
+    if (hideCursor) {
+        // A pointer arrow on a touch panel is noise; it only reappears if the
+        // kiosk is driven with a mouse, which is what GLFW_CURSOR_HIDDEN allows.
+        glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_HIDDEN);
+    }
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();

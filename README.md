@@ -51,10 +51,12 @@ The GUI is a **rebuild, not a port** — Dear ImGui rather than the original
 PaintCode vector artwork — so it covers all six panels but does not look like
 the iOS app.
 
+The boot-to-synth setup is in place: `sudo ./install.sh --kiosk` installs a
+systemd service that brings up a bare X server on tty1 with the synth as its
+only client, configured through `/etc/synthone/kiosk.conf`.
+
 See [`linux/README.md`](linux/README.md) for the full design, dependencies and
-current status. Status in short: the engine, both hosts, the GUI and the ARM64
-packaging work; the boot-to-app kiosk integration on the Pi is the next step,
-not something the install script does yet.
+current status.
 
 ### On the state of upstream
 

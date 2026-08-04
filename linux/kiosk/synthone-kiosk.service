@@ -1,0 +1,54 @@
+[Unit]
+# AudioKit Synth One - Linux port
+#
+# Boots straight into the synth: a bare X server on vt1 with synthone-gui as
+# its only client. No display manager, no desktop, no window manager.
+#
+# Installed and enabled by `install.sh --kiosk`.
+Description=AudioKit Synth One (kiosk)
+Documentation=file://@KIOSK_CONF@
+Documentation=https://github.com/caseypaite/AudioKitSynthOne
+
+# The panel has to be there before X starts, and the sound card before the
+# engine opens it. sound.target is reached once ALSA has restored its state.
+After=systemd-user-sessions.service sound.target
+Wants=sound.target
+
+# getty owns vt1 by default; both cannot have it, so take it over.
+After=getty@tty1.service
+Conflicts=getty@tty1.service
+
+[Service]
+Type=simple
+User=@KIOSK_USER@
+Group=@KIOSK_GROUP@
+
+# X wants a real tty to take over, and refuses to start without one.
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+StandardInput=tty
+StandardOutput=journal
+StandardError=journal
+
+PAMName=login
+
+ExecStart=@BIN_DIR@/synthone-kiosk
+
+# A synth that dies should come straight back rather than leave a black panel.
+Restart=always
+RestartSec=2
+
+# Audio wants to keep up with the buffer even when the CPU is busy. This is a
+# request, not a guarantee: it only takes effect if the user has the headroom
+# (see /etc/security/limits.d and the audio group).
+Nice=-10
+IOSchedulingClass=realtime
+IOSchedulingPriority=2
+
+# Let the engine finish its buffer rather than being killed mid-note.
+TimeoutStopSec=10
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=multi-user.target

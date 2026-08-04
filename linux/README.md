@@ -129,6 +129,57 @@ docker run --privileged --rm tonistiigi/binfmt --install arm64   # once
 Emulated compilation is slow. `package.sh --build-dir DIR --arch NAME` packages
 binaries built elsewhere, e.g. on real hardware.
 
+### Raspberry Pi kiosk (boot straight into the synth)
+
+`install.sh --kiosk` adds a systemd service that starts a bare X server on tty1
+with `synthone-gui` as its only client. No display manager, no desktop, no
+window manager -- the synth owns the panel, and the Pi's CPU goes to audio
+rather than to a desktop session.
+
+```sh
+sudo ./install.sh --prefix /usr/local --kiosk --kiosk-user pi
+sudo systemctl start synthone-kiosk        # or just reboot
+journalctl -u synthone-kiosk -f            # watch it come up
+```
+
+It needs `xserver-xorg` and `xinit` (`apt install xserver-xorg xinit`) -- an X
+server, but no desktop on top of it. Installing the kiosk also:
+
+- takes tty1 from `getty` (`Conflicts=getty@tty1.service`), which `--uninstall`
+  gives back;
+- adds the kiosk user to `audio`, `video`, `input` and `tty`;
+- writes `/etc/X11/Xwrapper.config` with `allowed_users=anybody` if that file
+  does not already exist, since a service is not a console login. If it does
+  exist, the script tells you what to add rather than editing it.
+
+The service is enabled but **not started**, so you keep the console you ran it
+from.
+
+Settings live in `/etc/synthone/kiosk.conf`, never in the unit, and survive
+reinstalls:
+
+| Key | Default | Notes |
+| --- | --- | --- |
+| `BACKEND` | `portaudio` | ALSA directly, nothing to start first. `jack` if you run a server. |
+| `GEOMETRY` | empty | Empty fills the panel; the official 7" display is `800x480`. |
+| `LAYOUT` | empty | `stacked` or `side`. On a 480px-tall panel try `side`. |
+| `TOP` / `BOTTOM` | empty | Panels: `MAIN ENV PAD FX SEQ TUNE`. |
+| `MIDI` | `all` | ALSA source as `CLIENT:PORT`, or everything. |
+| `HIDE_CURSOR` | `1` | Pointer off, for a touch panel. |
+| `VT` / `DISPLAY_NUM` | `vt1` / `:0` | Which console and display to take. |
+| `XSERVER_ARGS` | `-nolisten tcp -nocursor` | Passed to X. |
+| `EXTRA_ARGS` | empty | Anything else for `synthone-gui`. |
+
+The two GUI flags this relies on, `--fullscreen` and `--hide-cursor`, work on
+their own too, so you can try the kiosk configuration inside a desktop session
+before committing to it.
+
+To take it off without removing the app:
+
+```sh
+sudo systemctl disable --now synthone-kiosk
+```
+
 ### Where presets live
 
 Factory banks ship read-only in `AudioKitSynthOne/Presets/Data/` and are never
@@ -265,5 +316,7 @@ linux/
   src/                  Soundpipe additions, Obj-C file replacements,
                         JSON reader, engine facade
   host/                 JACK + PortAudio backends, ALSA MIDI, CLI
+  gui/                  Dear ImGui front end
+  kiosk/                systemd unit, launcher and config for the Pi kiosk
   tools/                synthone-offline
 ```

@@ -1,0 +1,86 @@
+#!/bin/sh
+#
+# synthone-kiosk
+# AudioKit Synth One - Linux port
+#
+# Brings up a bare X server with synthone-gui as its only client: no window
+# manager, no desktop, no session manager. Started by synthone-kiosk.service on
+# boot; also runnable by hand from a text console to try the setup out.
+#
+# Settings come from the config file so the unit itself never needs editing:
+#
+#     /etc/synthone/kiosk.conf        system install
+#     ~/.config/synthone/kiosk.conf   user install
+#
+# Anything passed on the command line is appended after the configured
+# arguments, and the GUI lets the last occurrence win, so callers override.
+#
+
+set -eu
+
+CONFIG="${SYNTHONE_KIOSK_CONFIG:-@CONFIG@}"
+
+# -- defaults ---------------------------------------------------------------
+#
+# Empty GEOMETRY means "whatever the panel reports", which is what you want on
+# the official 7" display (800x480) and on anything else plugged in later.
+
+BACKEND="portaudio"
+GEOMETRY=""
+LAYOUT=""
+TOP=""
+BOTTOM=""
+MIDI="all"
+HIDE_CURSOR="1"
+VT="vt1"
+DISPLAY_NUM=":0"
+XSERVER_ARGS="-nolisten tcp -nocursor"
+EXTRA_ARGS=""
+
+# shellcheck source=/dev/null
+[ -r "$CONFIG" ] && . "$CONFIG"
+
+GUI="@BIN_DIR@/synthone-gui"
+[ -x "$GUI" ] || { echo "synthone-kiosk: $GUI is missing or not executable" >&2; exit 1; }
+
+command -v xinit >/dev/null 2>&1 || {
+    echo "synthone-kiosk: xinit is required (apt install xserver-xorg xinit)" >&2
+    exit 1
+}
+
+# -- assemble the client command --------------------------------------------
+#
+# The caller's arguments have to end up last. There are no arrays in POSIX sh,
+# so append ours after theirs and then rotate theirs around to the back.
+
+caller_argc=$#
+
+set -- "$@" "$GUI" --fullscreen --backend "$BACKEND"
+
+[ -n "$GEOMETRY" ] && set -- "$@" --geometry "$GEOMETRY"
+[ -n "$LAYOUT" ]   && set -- "$@" --layout "$LAYOUT"
+[ -n "$TOP" ]      && set -- "$@" --top "$TOP"
+[ -n "$BOTTOM" ]   && set -- "$@" --bottom "$BOTTOM"
+[ -n "$MIDI" ]     && set -- "$@" --midi "$MIDI"
+[ "$HIDE_CURSOR" = "1" ] && set -- "$@" --hide-cursor
+
+# Word splitting is deliberate here: EXTRA_ARGS is a config string.
+# shellcheck disable=SC2086
+[ -n "$EXTRA_ARGS" ] && set -- "$@" $EXTRA_ARGS
+
+i=0
+while [ "$i" -lt "$caller_argc" ]; do
+    first="$1"
+    shift
+    set -- "$@" "$first"
+    i=$((i + 1))
+done
+
+# -- go ---------------------------------------------------------------------
+#
+# xinit runs the client, then tears the server down when the client exits; the
+# service restarts, so a crash brings the synth straight back.
+
+# Word splitting is deliberate: XSERVER_ARGS is a config string.
+# shellcheck disable=SC2086
+exec xinit "$@" -- "$DISPLAY_NUM" "$VT" $XSERVER_ARGS
