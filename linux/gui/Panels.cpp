@@ -40,6 +40,21 @@ void endPanelChild() {
     ImGui::PopStyleColor();
 }
 
+// Standard knob cell footprint: the wider of the drag target and the typical
+// label so neighbouring groups don't collide.
+float kw() { return std::max({KnobDiameter() + 8.0f, 56.0f}); }
+
+// Advance the cursor so that `w` pixels of content are centred within the
+// current column / available region. Call immediately before placing controls.
+void centreH(float w) {
+    const float off = std::max(0.0f, (ImGui::GetContentRegionAvail().x - w) * 0.5f);
+    if (off > 0.0f) ImGui::SetCursorPosX(ImGui::GetCursorPosX() + off);
+}
+
+// Table flags used for every horizontal-fill row.
+constexpr ImGuiTableFlags kHFill =
+    ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_NoPadOuterX;
+
 } // namespace
 
 void UiState::notify(const std::string &text) {
@@ -63,78 +78,105 @@ const char *PanelName(Panel panel) {
 // Generators / MAIN
 // ---------------------------------------------------------------------------
 
-static void drawGenerators(s1::Engine &engine, UiState &ui) {
-    // Pack the two narrower sections (SUB/FM/NOISE and FILTER) side by side:
-    // same layout at all resolutions. On a large display you just get bigger
-    // knobs in the same grouping; on the Pi the knobs shrink but the structure
-    // is identical.
-    constexpr bool pack = true;
-
+static void drawGenerators(s1::Engine &engine, UiState &) {
+    // ---- OSCILLATORS: three columns OSC1 | OSC2 | MIX (3:4:1 stretch) ----
     SectionLabel("OSCILLATORS");
-    ImGui::BeginGroup();
-    Knob(engine, {index1, "MORPH 1", 1.0f, Units::Raw});             ImGui::SameLine();
-    Knob(engine, {morph1SemitoneOffset, "SEMI 1", 1.0f, Units::Semitones}); ImGui::SameLine();
-    Knob(engine, {morph1Volume, "VOL 1", 1.0f, Units::Percent});     ImGui::SameLine();
-    ImGui::Dummy(ImVec2(18, 1));                                      ImGui::SameLine();
-    Knob(engine, {index2, "MORPH 2", 1.0f, Units::Raw});             ImGui::SameLine();
-    Knob(engine, {morph2SemitoneOffset, "SEMI 2", 1.0f, Units::Semitones}); ImGui::SameLine();
-    Knob(engine, {morph2Detuning, "DETUNE", 1.0f, Units::Raw});      ImGui::SameLine();
-    Knob(engine, {morph2Volume, "VOL 2", 1.0f, Units::Percent});     ImGui::SameLine();
-    ImGui::Dummy(ImVec2(18, 1));                                      ImGui::SameLine();
-    Knob(engine, {morphBalance, "MIX 1<>2", 1.0f, Units::Percent});
-    ImGui::EndGroup();
+    if (ImGui::BeginTable("osc", 3, kHFill)) {
+        ImGui::TableSetupColumn(nullptr, ImGuiTableColumnFlags_WidthStretch, 3.0f);
+        ImGui::TableSetupColumn(nullptr, ImGuiTableColumnFlags_WidthStretch, 4.0f);
+        ImGui::TableSetupColumn(nullptr, ImGuiTableColumnFlags_WidthStretch, 1.0f);
+        ImGui::TableNextRow();
 
-    // -- SUB / FM / NOISE and FILTER: one row each, or side by side ---------
-    ImGui::BeginGroup();
-    SectionLabel("SUB / FM / NOISE");
-    ImGui::BeginGroup();
-    Knob(engine, {subVolume, "SUB", 1.0f, Units::Percent});          ImGui::SameLine();
-    ImGui::BeginGroup();
-    ImGui::Dummy(ImVec2(1, 22));
-    Toggle(engine, subOctaveDown, "-24", ImVec2(52, 0));
-    Toggle(engine, subIsSquare, "SQR", ImVec2(52, 0));
-    ImGui::EndGroup();                                                ImGui::SameLine();
-    ImGui::Dummy(ImVec2(pack ? 8.0f : 18.0f, 1));                     ImGui::SameLine();
-    Knob(engine, {fmVolume, "FM MIX", 1.0f, Units::Percent});        ImGui::SameLine();
-    Knob(engine, {fmAmount, "FM MOD", 1.0f, Units::Raw});            ImGui::SameLine();
-    ImGui::Dummy(ImVec2(pack ? 8.0f : 18.0f, 1));                     ImGui::SameLine();
-    Knob(engine, {noiseVolume, "NOISE", 1.0f, Units::Percent});
-    ImGui::EndGroup();
-    ImGui::EndGroup();
+        ImGui::TableSetColumnIndex(0);
+        centreH(3 * kw());
+        Knob(engine, {index1,              "MORPH 1", 1.0f, Units::Raw});       ImGui::SameLine();
+        Knob(engine, {morph1SemitoneOffset,"SEMI 1",  1.0f, Units::Semitones}); ImGui::SameLine();
+        Knob(engine, {morph1Volume,        "VOL 1",   1.0f, Units::Percent});
 
-    if (pack) ImGui::SameLine(0.0f, 18.0f);
+        ImGui::TableSetColumnIndex(1);
+        centreH(4 * kw());
+        Knob(engine, {index2,              "MORPH 2", 1.0f, Units::Raw});       ImGui::SameLine();
+        Knob(engine, {morph2SemitoneOffset,"SEMI 2",  1.0f, Units::Semitones}); ImGui::SameLine();
+        Knob(engine, {morph2Detuning,      "DETUNE",  1.0f, Units::Raw});       ImGui::SameLine();
+        Knob(engine, {morph2Volume,        "VOL 2",   1.0f, Units::Percent});
 
-    ImGui::BeginGroup();
-    SectionLabel("FILTER");
-    ImGui::BeginGroup();
-    Knob(engine, {cutoff, "CUTOFF", 2.0f, Units::Hertz}, 58.0f);     ImGui::SameLine();
-    Knob(engine, {resonance, "RES", 1.0f, Units::Percent});          ImGui::SameLine();
-    ImGui::BeginGroup();
-    ImGui::Dummy(ImVec2(1, 22));
-    Selector(engine, filterType, "TYPE", kFilterTypes, 3);
-    ImGui::EndGroup();
-    ImGui::EndGroup();
-    ImGui::EndGroup();
+        ImGui::TableSetColumnIndex(2);
+        centreH(kw());
+        Knob(engine, {morphBalance, "MIX 1<>2", 1.0f, Units::Percent});
 
+        ImGui::EndTable();
+    }
+
+    // ---- SUB / FM / NOISE  |  FILTER: two equal columns ----
+    if (ImGui::BeginTable("sub_filter", 2, kHFill)) {
+        ImGui::TableNextRow();
+
+        ImGui::TableSetColumnIndex(0);
+        SectionLabel("SUB / FM / NOISE");
+        // SUB knob + [-24/SQR toggle stack] + FM MIX + FM MOD + NOISE
+        centreH(kw() + 52.0f + 8.0f + kw() + kw() + 8.0f + kw());
+        Knob(engine, {subVolume, "SUB", 1.0f, Units::Percent}); ImGui::SameLine();
+        ImGui::BeginGroup();
+        ImGui::Dummy(ImVec2(1, 22));
+        Toggle(engine, subOctaveDown, "-24", ImVec2(52, 0));
+        Toggle(engine, subIsSquare,   "SQR", ImVec2(52, 0));
+        ImGui::EndGroup();                                       ImGui::SameLine();
+        ImGui::Dummy(ImVec2(8, 1));                              ImGui::SameLine();
+        Knob(engine, {fmVolume,   "FM MIX", 1.0f, Units::Percent}); ImGui::SameLine();
+        Knob(engine, {fmAmount,   "FM MOD", 1.0f, Units::Raw});     ImGui::SameLine();
+        ImGui::Dummy(ImVec2(8, 1));                              ImGui::SameLine();
+        Knob(engine, {noiseVolume,"NOISE",  1.0f, Units::Percent});
+
+        ImGui::TableSetColumnIndex(1);
+        SectionLabel("FILTER");
+        // CUTOFF (big) + RES + TYPE selector
+        const float cutoffW = std::max({KnobDiameter(58.0f) + 8.0f, 56.0f});
+        centreH(cutoffW + kw() + 8.0f + 90.0f); // 90px ≈ LP/BP/HP selector
+        Knob(engine, {cutoff,    "CUTOFF", 2.0f, Units::Hertz},  58.0f); ImGui::SameLine();
+        Knob(engine, {resonance, "RES",    1.0f, Units::Percent});       ImGui::SameLine();
+        ImGui::BeginGroup();
+        ImGui::Dummy(ImVec2(1, 22));
+        Selector(engine, filterType, "TYPE", kFilterTypes, 3);
+        ImGui::EndGroup();
+
+        ImGui::EndTable();
+    }
+
+    // ---- MASTER: four equal columns VOL/GLIDE | MONO | WIDEN | TEMPO ----
     SectionLabel("MASTER");
-    ImGui::BeginGroup();
-    Knob(engine, {masterVolume, "VOLUME", 2.0f, Units::Percent}, 58.0f); ImGui::SameLine();
-    Knob(engine, {glide, "GLIDE", 2.0f, Units::Seconds});               ImGui::SameLine();
-    ImGui::BeginGroup();
-    ImGui::Dummy(ImVec2(1, 22));
-    Toggle(engine, isMono, "MONO", ImVec2(64, 0));
-    Toggle(engine, monoIsLegato, "LEGATO", ImVec2(64, 0));
-    ImGui::EndGroup();                                                   ImGui::SameLine();
-    ImGui::BeginGroup();
-    ImGui::Dummy(ImVec2(1, 22));
-    Toggle(engine, widen, "WIDEN", ImVec2(74, 0));
-    Toggle(engine, oscBandlimitEnable, "BANDLIM", ImVec2(74, 0));
-    ImGui::EndGroup();                                                   ImGui::SameLine();
-    ImGui::BeginGroup();
-    ImGui::Dummy(ImVec2(1, 12));
-    Stepper(engine, arpRate, "TEMPO (BPM)", 130.0f);
-    ImGui::EndGroup();
-    ImGui::EndGroup();
+    if (ImGui::BeginTable("master", 4, kHFill)) {
+        ImGui::TableNextRow();
+
+        ImGui::TableSetColumnIndex(0);
+        centreH(2 * kw());
+        Knob(engine, {masterVolume, "VOLUME", 2.0f, Units::Percent}, 58.0f); ImGui::SameLine();
+        Knob(engine, {glide,        "GLIDE",  2.0f, Units::Seconds});
+
+        ImGui::TableSetColumnIndex(1);
+        centreH(64.0f);
+        ImGui::BeginGroup();
+        ImGui::Dummy(ImVec2(1, 22));
+        Toggle(engine, isMono,       "MONO",   ImVec2(64, 0));
+        Toggle(engine, monoIsLegato, "LEGATO", ImVec2(64, 0));
+        ImGui::EndGroup();
+
+        ImGui::TableSetColumnIndex(2);
+        centreH(74.0f);
+        ImGui::BeginGroup();
+        ImGui::Dummy(ImVec2(1, 22));
+        Toggle(engine, widen,              "WIDEN",   ImVec2(74, 0));
+        Toggle(engine, oscBandlimitEnable, "BANDLIM", ImVec2(74, 0));
+        ImGui::EndGroup();
+
+        ImGui::TableSetColumnIndex(3);
+        centreH(130.0f);
+        ImGui::BeginGroup();
+        ImGui::Dummy(ImVec2(1, 12));
+        Stepper(engine, arpRate, "TEMPO (BPM)", 130.0f);
+        ImGui::EndGroup();
+
+        ImGui::EndTable();
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -168,8 +210,16 @@ static void drawEnvelopes(s1::Engine &engine, UiState &) {
     ImGui::EndGroup();
 
     SectionLabel("ENVELOPE AMOUNT");
-    Knob(engine, {filterADSRMix, "FILTER ENV", 1.0f, Units::Percent}, 58.0f); ImGui::SameLine();
-    Knob(engine, {adsrPitchTracking, "PITCH TRACK", 3.0f, Units::Percent}, 58.0f);
+    if (ImGui::BeginTable("env_amt", 2, kHFill)) {
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        centreH(std::max({KnobDiameter(58.0f) + 8.0f, 56.0f}));
+        Knob(engine, {filterADSRMix,      "FILTER ENV",  1.0f, Units::Percent}, 58.0f);
+        ImGui::TableSetColumnIndex(1);
+        centreH(std::max({KnobDiameter(58.0f) + 8.0f, 56.0f}));
+        Knob(engine, {adsrPitchTracking,  "PITCH TRACK", 3.0f, Units::Percent}, 58.0f);
+        ImGui::EndTable();
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -213,25 +263,35 @@ static void drawTouchPad(s1::Engine &engine, UiState &ui) {
 // ---------------------------------------------------------------------------
 
 static void drawEffects(s1::Engine &engine, UiState &ui) {
+    // ---- LFO: two columns LFO1 | LFO2+TEMPO SYNC ----
     SectionLabel("LFO");
-    ImGui::BeginGroup();
-    Selector(engine, lfo1Index, "LFO1 WAVE", kLfoWaveforms, 4);
-    ImGui::SameLine(0.0f, 16.0f);
-    DependentKnob(engine, lfo1Rate, "LFO1 RATE", kLfo1RateEffectsPanelID, nullptr);
-    ImGui::SameLine();
-    Knob(engine, {lfo1Amplitude, "LFO1 AMT", 1.0f, Units::Percent});
-    ImGui::SameLine(0.0f, 24.0f);
-    Selector(engine, lfo2Index, "LFO2 WAVE", kLfoWaveforms, 4);
-    ImGui::SameLine(0.0f, 16.0f);
-    DependentKnob(engine, lfo2Rate, "LFO2 RATE", kLfo2RateEffectsPanelID, nullptr);
-    ImGui::SameLine();
-    Knob(engine, {lfo2Amplitude, "LFO2 AMT", 1.0f, Units::Percent});
-    ImGui::SameLine(0.0f, 24.0f);
-    ImGui::BeginGroup();
-    ImGui::Dummy(ImVec2(1, 14));
-    Toggle(engine, tempoSyncToArpRate, "TEMPO SYNC", ImVec2(110, 0));
-    ImGui::EndGroup();
-    ImGui::EndGroup();
+    if (ImGui::BeginTable("lfo", 2, kHFill)) {
+        ImGui::TableNextRow();
+
+        ImGui::TableSetColumnIndex(0);
+        ImGui::BeginGroup();
+        Selector(engine, lfo1Index, "LFO1 WAVE", kLfoWaveforms, 4);
+        ImGui::SameLine(0.0f, 12.0f);
+        DependentKnob(engine, lfo1Rate,      "LFO1 RATE", kLfo1RateEffectsPanelID, nullptr);
+        ImGui::SameLine();
+        Knob(engine, {lfo1Amplitude, "LFO1 AMT", 1.0f, Units::Percent});
+        ImGui::EndGroup();
+
+        ImGui::TableSetColumnIndex(1);
+        ImGui::BeginGroup();
+        Selector(engine, lfo2Index, "LFO2 WAVE", kLfoWaveforms, 4);
+        ImGui::SameLine(0.0f, 12.0f);
+        DependentKnob(engine, lfo2Rate,      "LFO2 RATE", kLfo2RateEffectsPanelID, nullptr);
+        ImGui::SameLine();
+        Knob(engine, {lfo2Amplitude, "LFO2 AMT", 1.0f, Units::Percent});
+        ImGui::SameLine(0.0f, 16.0f);
+        ImGui::BeginGroup(); ImGui::Dummy(ImVec2(1, 14));
+        Toggle(engine, tempoSyncToArpRate, "TEMPO SYNC", ImVec2(110, 0));
+        ImGui::EndGroup();
+        ImGui::EndGroup();
+
+        ImGui::EndTable();
+    }
 
     SectionLabel("LFO ROUTING");
     static const ModTarget kLfoTargets2[] = {
@@ -254,31 +314,54 @@ static void drawEffects(s1::Engine &engine, UiState &ui) {
               static_cast<int>(sizeof(kLfoTargets2) / sizeof(kLfoTargets2[0])),
               4);
 
+    // ---- REVERB / DELAY: two equal columns ----
     SectionLabel("REVERB / DELAY");
-    ImGui::BeginGroup();
-    Toggle(engine, reverbOn, "REVERB", ImVec2(80, 0));               ImGui::SameLine();
-    Knob(engine, {reverbFeedback, "SIZE", 1.0f, Units::Percent});    ImGui::SameLine();
-    Knob(engine, {reverbHighPass, "LOW CUT", 1.0f, Units::Hertz});   ImGui::SameLine();
-    Knob(engine, {reverbMix, "MIX", 1.0f, Units::Percent});
-    ImGui::SameLine(0.0f, 24.0f);
-    Toggle(engine, delayOn, "DELAY", ImVec2(80, 0));                 ImGui::SameLine();
-    DependentKnob(engine, delayTime, "TIME", kDelayTimeEffectsPanelID, nullptr); ImGui::SameLine();
-    Knob(engine, {delayFeedback, "FEEDBACK", 1.0f, Units::Percent}); ImGui::SameLine();
-    Knob(engine, {delayMix, "MIX", 1.0f, Units::Percent});
-    ImGui::EndGroup();
+    if (ImGui::BeginTable("rev_dly", 2, kHFill)) {
+        ImGui::TableNextRow();
 
+        ImGui::TableSetColumnIndex(0);
+        ImGui::BeginGroup();
+        Toggle(engine, reverbOn, "REVERB", ImVec2(80, 0)); ImGui::SameLine();
+        Knob(engine, {reverbFeedback, "SIZE",    1.0f, Units::Percent}); ImGui::SameLine();
+        Knob(engine, {reverbHighPass, "LOW CUT", 1.0f, Units::Hertz});   ImGui::SameLine();
+        Knob(engine, {reverbMix,      "MIX",     1.0f, Units::Percent});
+        ImGui::EndGroup();
+
+        ImGui::TableSetColumnIndex(1);
+        ImGui::BeginGroup();
+        Toggle(engine, delayOn, "DELAY", ImVec2(80, 0)); ImGui::SameLine();
+        DependentKnob(engine, delayTime, "TIME", kDelayTimeEffectsPanelID, nullptr); ImGui::SameLine();
+        Knob(engine, {delayFeedback, "FEEDBACK", 1.0f, Units::Percent}); ImGui::SameLine();
+        Knob(engine, {delayMix,      "MIX",      1.0f, Units::Percent});
+        ImGui::EndGroup();
+
+        ImGui::EndTable();
+    }
+
+    // ---- PHASER / AUTOPAN / BITCRUSH: three columns ----
     SectionLabel("PHASER / AUTOPAN / BITCRUSH");
-    ImGui::BeginGroup();
-    Knob(engine, {phaserMix, "PHASE MIX", 1.0f, Units::Percent});          ImGui::SameLine();
-    Knob(engine, {phaserRate, "RATE", 2.0f, Units::Hertz});                ImGui::SameLine();
-    Knob(engine, {phaserFeedback, "FEEDBACK", 1.0f, Units::Percent});      ImGui::SameLine();
-    Knob(engine, {phaserNotchWidth, "NOTCH", 1.0f, Units::Hertz});
-    ImGui::SameLine(0.0f, 24.0f);
-    Knob(engine, {autoPanAmount, "PAN AMT", 1.0f, Units::Percent});        ImGui::SameLine();
-    DependentKnob(engine, autoPanFrequency, "PAN RATE", kAutoPanEffectsPanelID, nullptr);
-    ImGui::SameLine(0.0f, 24.0f);
-    Knob(engine, {bitCrushSampleRate, "BITCRUSH", 4.6f, Units::Hertz}, 58.0f);
-    ImGui::EndGroup();
+    if (ImGui::BeginTable("phaser", 3, kHFill)) {
+        ImGui::TableNextRow();
+
+        ImGui::TableSetColumnIndex(0);
+        centreH(4 * kw());
+        Knob(engine, {phaserMix,      "PHASE MIX", 1.0f, Units::Percent}); ImGui::SameLine();
+        Knob(engine, {phaserRate,     "RATE",       2.0f, Units::Hertz});   ImGui::SameLine();
+        Knob(engine, {phaserFeedback, "FEEDBACK",   1.0f, Units::Percent}); ImGui::SameLine();
+        Knob(engine, {phaserNotchWidth,"NOTCH",     1.0f, Units::Hertz});
+
+        ImGui::TableSetColumnIndex(1);
+        centreH(2 * kw());
+        Knob(engine, {autoPanAmount, "PAN AMT", 1.0f, Units::Percent}); ImGui::SameLine();
+        DependentKnob(engine, autoPanFrequency, "PAN RATE", kAutoPanEffectsPanelID, nullptr);
+
+        ImGui::TableSetColumnIndex(2);
+        const float bitW = std::max({KnobDiameter(58.0f) + 8.0f, 56.0f});
+        centreH(bitW);
+        Knob(engine, {bitCrushSampleRate, "BITCRUSH", 4.6f, Units::Hertz}, 58.0f);
+
+        ImGui::EndTable();
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -286,15 +369,24 @@ static void drawEffects(s1::Engine &engine, UiState &ui) {
 // ---------------------------------------------------------------------------
 
 static void drawSequencer(s1::Engine &engine, UiState &ui) {
+    // ---- ARPEGGIATOR: distribute controls across full width ----
     SectionLabel("ARPEGGIATOR");
-    ImGui::BeginGroup();
-    Toggle(engine, arpIsOn, "ARP ON", ImVec2(90, 0));            ImGui::SameLine(0.0f, 16.0f);
-    Toggle(engine, arpIsSequencer, "SEQUENCER", ImVec2(110, 0)); ImGui::SameLine(0.0f, 16.0f);
-    Selector(engine, arpDirection, "DIRECTION", kArpDirections, 3);
-    ImGui::SameLine(0.0f, 16.0f);
-    Knob(engine, {arpInterval, "INTERVAL", 1.0f, Units::Index}); ImGui::SameLine();
-    DependentKnob(engine, arpSeqTempoMultiplier, "TEMPO x", kArpSeqTempoMultiplierID, nullptr);
-    ImGui::EndGroup();
+    if (ImGui::BeginTable("arp_row", 4, kHFill)) {
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        centreH(90.0f + 8.0f + 110.0f);
+        Toggle(engine, arpIsOn,         "ARP ON",    ImVec2(90,  0)); ImGui::SameLine(0, 8);
+        Toggle(engine, arpIsSequencer,  "SEQUENCER", ImVec2(110, 0));
+        ImGui::TableSetColumnIndex(1);
+        Selector(engine, arpDirection, "DIRECTION", kArpDirections, 3);
+        ImGui::TableSetColumnIndex(2);
+        centreH(kw());
+        Knob(engine, {arpInterval, "INTERVAL", 1.0f, Units::Index});
+        ImGui::TableSetColumnIndex(3);
+        centreH(kw());
+        DependentKnob(engine, arpSeqTempoMultiplier, "TEMPO x", kArpSeqTempoMultiplierID, nullptr);
+        ImGui::EndTable();
+    }
 
     ImGui::Spacing();
     ImGui::BeginGroup();
@@ -497,23 +589,18 @@ void DrawHeader(s1::Engine &engine, UiState &ui) {
         ui.showSaveDialog = true;
     }
 
-    // One button cycles the three layouts: one panel, two stacked, two side by
-    // side. A short display has room for exactly one, so compact drops the
-    // button rather than offering two choices that do not fit -- and spends
-    // the width on the controls instead.
+    // Layout toggle: SINGLE (default) <-> STACK. Side-by-side is removed from
+    // the interactive cycle; --layout side on the CLI still works if needed.
     if (wide) {
         ImGui::SameLine(0.0f, gapSmall);
-        const char *layoutLabel = ui.singlePanel  ? "LAYOUT: SINGLE"
-                                  : ui.sideBySide ? "LAYOUT: SIDE"
-                                                  : "LAYOUT: STACK";
-        if (ImGui::Button(layoutLabel, ImVec2(130.0f, 0))) {
-            if (ui.singlePanel) { ui.singlePanel = false; ui.sideBySide = false; }
-            else if (!ui.sideBySide) { ui.sideBySide = true; }
-            else { ui.singlePanel = true; ui.sideBySide = false; }
+        const char *layoutLabel = ui.singlePanel ? "LAYOUT: SINGLE" : "LAYOUT: STACK";
+        if (ImGui::Button(layoutLabel, ImVec2(120.0f, 0))) {
+            ui.singlePanel = !ui.singlePanel;
+            if (ui.singlePanel) ui.sideBySide = false;
         }
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("single = one panel at a time; stacked = top/bottom; "
-                              "side = split by a vertical divider");
+            ImGui::SetTooltip("SINGLE: one panel at a time (default)\n"
+                              "STACK: two panels top/bottom");
         }
     }
 
