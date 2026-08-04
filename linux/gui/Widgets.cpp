@@ -64,6 +64,9 @@ bool knobBehaviour(const char *id, const ImVec2 &size, float &position, bool &re
 
 bool gLearnMode = false;
 bool gCompactWidgets = false;
+// Smallest compact knob face. Panels with room to spare raise it; see
+// SetCompactKnobFloor.
+float gCompactKnobFloor = 32.0f;
 
 /// Height of the label + readout block above a knob face.
 float knobLabelBlock() { return gCompactWidgets ? 20.0f : 28.0f; }
@@ -121,8 +124,11 @@ float KnobDiameter(float requested) {
     // the height of its whole row. Uniform cells buy a row back on FX, and the
     // emphasis reads poorly at this scale anyway.
     if (!gCompactWidgets) return requested;
-    return std::max(32.0f, std::min(requested, 46.0f) * 0.70f);
+    return std::max(gCompactKnobFloor, std::min(requested, 46.0f) * 0.70f);
 }
+
+void SetCompactKnobFloor(float px) { gCompactKnobFloor = px; }
+float CompactKnobFloor() { return gCompactKnobFloor; }
 
 std::string FormatValue(float value, Units units) {
     char buf[64];

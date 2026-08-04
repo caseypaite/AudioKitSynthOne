@@ -66,6 +66,26 @@ float KnobDiameter(float requested = 46.0f);
 /// to declare how tall a block of knobs will be before drawing it.
 float KnobCellHeight(float requested = 46.0f);
 
+/// Smallest knob face compact mode will draw (default 32px). Compact sizes
+/// knobs down so the busiest panels fit without scrolling, but a panel that
+/// finishes well above the fold has no reason to pay that price -- it can
+/// raise the floor for its own controls and hand the touch target back.
+/// Use s1gui::KnobFloor for a scoped change.
+void SetCompactKnobFloor(float px);
+float CompactKnobFloor();
+
+/// Scoped compact knob floor: raises it for one panel and puts it back.
+class KnobFloor {
+public:
+    explicit KnobFloor(float px) : mPrev(CompactKnobFloor()) { SetCompactKnobFloor(px); }
+    ~KnobFloor() { SetCompactKnobFloor(mPrev); }
+    KnobFloor(const KnobFloor &) = delete;
+    KnobFloor &operator=(const KnobFloor &) = delete;
+
+private:
+    float mPrev;
+};
+
 /// Rotary knob bound directly to a synth parameter. Returns true if edited.
 /// Drag vertically to adjust; shift for fine; double-click resets to default.
 bool Knob(s1::Engine &engine, const KnobSpec &spec, float diameter = 46.0f);

@@ -461,6 +461,12 @@ static void drawSequencer(s1::Engine &engine, UiState &ui) {
 // ---------------------------------------------------------------------------
 
 static void drawTunings(s1::Engine &engine, UiState &ui) {
+    // TUNE carries only three knobs and finishes well above the fold at
+    // 800x480, so it does not need the 32px compact face that lets the busy
+    // panels fit. Give its knobs back a proper touch target -- A4 and the two
+    // bend ranges are exactly the controls you want to nudge by hand.
+    KnobFloor bigKnobs(64.0f);
+
     BlockFlow flow;
 
     // One octave of the tuning table from middle C, as the iOS
