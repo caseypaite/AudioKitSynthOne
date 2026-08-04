@@ -262,45 +262,91 @@ self-contained **block** sized to its own contents, and `BlockFlow`
 next one will not fit.
 
 Blocks fill both dimensions: a 2x2 stack of toggles sits beside a row of knobs
-beside a stepper. MAIN is ten blocks on three shelves; SEQ fits all six
-arpeggiator controls on one; FX holds nine blocks in four. Each block keeps its
-own heading and border, so the grouping by function is more explicit than
-headings stacked down the page.
+beside a stepper. Each block keeps its own heading and border, so the grouping
+by function is more explicit than headings stacked down the page.
 
-Because the flow keys off available width, the same code packs FX into four
-shelves at 800x480 and two at 1440x900.
+Because the flow keys off available width, the same code lays a panel out at
+either resolution -- FX is four shelves at 800x480 and two at 1440x900, MAIN
+three and two. `BlockFlow` also takes an optional width, which turns it into a
+column; SEQ uses that for its desktop arrangement.
 
-Two rules worth knowing before adding a control:
+Three rules worth knowing before adding a control:
 
 - **Blocks never scroll.** A scrollbar inside one would steal width from the
   contents and truncate the captions, so they are created with
-  `NoScrollbar`. A block whose declared height is too small silently clips
+  `NoScrollbar`. A block whose declared size is too small silently clips
   instead -- if something disappears, the size passed to `flow.begin()` is
   wrong, not the layout.
-- **Declare sizes with the helpers.** `kw(label)` and `kwRow({...})` mirror
-  `Knob()`'s own width formula, which widens a cell when its caption is wider
-  than the face. Measuring with a bare knob width under-counts a row and
-  pushes it off the shelf.
+- **Declare sizes with the helpers,** at the size you are drawing:
+  `kw(label, diameter)` and `kwRow({...}, diameter)` mirror `Knob()`'s own
+  width formula, which widens a cell when its caption is wider than the face.
+- **A widget's own caption counts.** `Selector` and `Stepper` each emit a
+  caption line above their row even when it is empty, so a block holding one
+  needs `stepperBlockH()`, not `buttonBlockH(1)` -- half the height clips the
+  buttons away entirely.
 
 ### Knob sizes per panel
 
-Compact scales knob faces to 70% and floors them at 32px, which is what lets
-the busiest panel fit. Panels that finish above the fold have no reason to pay
-that price, so each raises the floor for its own controls with a scoped
-`s1gui::KnobFloor`:
+Every panel names one face size and measures every width at it. Compact then
+scales that to 70% and floors it, and each panel raises its own floor -- so the
+number that applies depends on the display:
 
-| Panel | Face | Why |
-| --- | --- | --- |
-| MAIN | 72px | Ten blocks, three shelves, ~95% of the height. |
-| ENV | 72px | Ten controls; the curve editors grow to 112px with them. |
-| TUNE | 64px | Three knobs, finishes well clear of the fold. |
-| SEQ | 52px | Cells are sized by their captions (`INTERVAL`, `TEMPO x`), so the face grows this far before the block widens and the arp row wraps. |
-| FX | 32px | **At capacity.** Thirty-odd controls in four shelves, clearing the fold by ~10px. Measured: even a 36px face costs 12px across its three knob shelves and brings the scrollbar back. |
-| PAD | -- | No knobs; the two XY pads take the full width and height instead. |
+| Panel | Desktop | Compact | Notes |
+| --- | --- | --- | --- |
+| MAIN | 80px | 72px | Desktop ceiling: 80 keeps it at two shelves, more wraps a third. |
+| FX | 64px | 32px | Both are ceilings. See below. |
+| ENV | 60px | 72px | The curve editor takes the rest of the height. |
+| SEQ | 60px | 52px | Cells are sized by their captions (`INTERVAL`, `TEMPO x`), so compact can grow to 52 before the block widens and the arp row wraps. |
+| TUNE | 60px | 64px | The pitch wheel takes the rest of the height. |
+| PAD | -- | -- | No knobs; the XY pads take the whole pane. |
 
-Raising one is a matter of trying it and looking: a bigger face widens the
+Compact is the tighter of the two. FX is the panel the compact scaling exists
+for: thirty-odd controls in four shelves, clearing the fold by ~10px, and
+measured, even a 36px face costs 12px across its three knob shelves and brings
+the scrollbar back.
+
+**Measure at the size you draw.** `kw(label, diameter)`, `kwRow({...},
+diameter)`, `knobBlockH(rows, diameter)` and `blockRowH(rows, diameter)` all
+take it for this reason. Measuring a spread at the default 46px while drawing
+at 60px overflows the block by ~50px, and blocks clip rather than scroll, so
+the symptom is a control that has silently vanished.
+
+Raising a size is a matter of trying it and looking: a bigger face widens the
 block as well as heightening it, so it can reflow a shelf and cost more than it
-gains. `tools/screenshots.sh` is the quickest way to check.
+gains. `tools/screenshots.sh --desktop` is the quickest way to check.
+
+### What fills a pane, and what does not
+
+ENV, SEQ and TUNE each have one elastic thing -- a curve editor, the step grid,
+the pitch wheel -- sized from `GetContentRegionAvail()`, so they absorb whatever
+the pane has spare and fill on their own at either resolution.
+
+MAIN and FX are all fixed-content blocks, so they fill only as far as their
+declared sizes reach. That is why their face sizes are tuned to the pane rather
+than left at a default.
+
+It also means a block's declared width matters: FX's routing block asked for
+640px to hold content measuring ~604, and those 36 wasted pixels were the
+difference between the LFO row fitting beside it and the matrix wrapping onto a
+shelf of its own.
+
+### SEQ
+
+The sequencer is arranged differently on each display, because the step grid is
+sixteen sliders and thirty-two buttons and the arp controls are six small
+blocks:
+
+- **Desktop** -- controls stacked in a column on the left, grid taking the rest
+  of the pane on the right. `BlockFlow` takes an optional width so the column
+  is built from the same primitive as everything else.
+- **Compact** -- controls on one shelf, grid on the one below, since sixteen
+  steps need most of an 800px panel on their own.
+
+Each step's transpose is a **vertical slider**, which is what the iOS panel
+uses: `SequencerPanelController` binds a `VerticalSlider` to each
+`sequencerPatternNN` over the parameter's own -12..+12 range, with the
+octave-boost and note-on buttons underneath. `SequencerGrid` takes the grid size
+and lays its columns out to fit, so the same code serves both arrangements.
 
 ### Where presets live
 

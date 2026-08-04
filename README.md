@@ -68,11 +68,12 @@ will not fit. A panel therefore fills both dimensions instead of leaving the
 same ragged edge on every full-width row, and the packing follows the window:
 the FX panel above takes four shelves at 800x480 and two on a desktop.
 
-Knob faces are then sized per panel against what is left over, from 72px on
-MAIN and ENV down to 32px on FX, which carries thirty-odd controls and is the
-one panel with nothing to spare. Padding and spacing give up pixels; buttons
-and scrollbars get *larger*, on the principle that a control you cannot hit
-with a fingertip is worse than one you have to scroll to.
+Knob faces are then sized per panel against what is left over — on the 7" panel
+that runs from 72px on MAIN and ENV down to 32px on FX, which carries
+thirty-odd controls and is the one panel with nothing to spare. Padding and
+spacing give up pixels; buttons and scrollbars get *larger*, on the principle
+that a control you cannot hit with a fingertip is worse than one you have to
+scroll to.
 
 [`linux/README.md`](linux/README.md#blocks-not-rows) has the details, including
 the per-panel sizes and why each is what it is.
@@ -82,9 +83,11 @@ the per-panel sizes and why each is what it is.
 ![The desktop layout — two panels stacked, at 1440x900](screenshots/desktop.gif)
 
 A desktop gets two panels at once, UPPER and LOWER, each with its own tab row.
-Nothing is rearranged by hand for it: the blocks simply pack into wider, shorter
-shelves, so MAIN takes two shelves here against three on the 7" panel. Three
-frames cover all six panels.
+Mostly nothing is rearranged by hand for it — the blocks pack into wider,
+shorter shelves, so MAIN takes two here against three on the 7" panel — and the
+knob faces grow to suit, up to 80px on MAIN. The exception is SEQ, which puts
+its arp controls in a column on the left and gives the whole right of the pane
+to the sixteen step sliders. Three frames cover all six panels.
 
 Both sets are captured with
 [`linux/tools/screenshots.sh`](linux/tools/screenshots.sh) (`--desktop` for the
