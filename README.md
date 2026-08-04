@@ -54,9 +54,22 @@ panel is 800x480, so below 1000x620 the GUI switches to a two-row header, one
 panel at a time, and tighter padding — while keeping knobs and buttons at
 finger size.
 
-The boot-to-synth setup is in place: `sudo ./install.sh --kiosk` installs a
-systemd service that brings up a bare X server on tty1 with the synth as its
-only client, configured through `/etc/synthone/kiosk.conf`.
+### The six panels at 800x480
+
+Every panel fits the 7" display without scrolling. Controls are grouped into
+blocks that pack left to right and wrap, so a panel fills both dimensions
+instead of leaving a ragged edge on every row.
+
+![The six panels — MAIN, ENV, PAD, FX, SEQ, TUNE — at 800x480](screenshots/panels.gif)
+
+Still frames are in [`screenshots/`](screenshots/), captured on a virtual X
+server at exactly the panel's resolution.
+
+### Booting into it
+
+`sudo ./install.sh --kiosk` installs a systemd service that brings up a bare X
+server on tty1 with the synth as its only client, configured through
+`/etc/synthone/kiosk.conf`.
 
 See [`linux/README.md`](linux/README.md) for the full design, dependencies and
 current status.
