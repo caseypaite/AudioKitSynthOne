@@ -505,8 +505,10 @@ void DrawHeader(s1::Engine &engine, UiState &ui) {
         engine.armMidiLearn(S1ParameterCount); // disarm on leaving learn mode
     }
 
+    // Row two is set by row one's full-width preset button, not by its own
+    // contents, so there is room for the whole word even when compact.
     ImGui::SameLine(0.0f, gapBig);
-    ImGui::TextColored(ImColor(color::kTextDim), wide ? "voices %d" : "%d", ui.voiceCount);
+    ImGui::TextColored(ImColor(color::kTextDim), "voices %d", ui.voiceCount);
     // Status text is transient and variable-length. Compact gives it its own
     // line rather than letting it push the row past the edge.
     if (ui.midiLearnMode) {
