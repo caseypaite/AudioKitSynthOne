@@ -33,7 +33,16 @@ MIDI="all"
 HIDE_CURSOR="1"
 VT="vt1"
 DISPLAY_NUM=":0"
-XSERVER_ARGS="-nolisten tcp -nocursor"
+# -s 0 turns the screensaver off and -dpms disables power management. Without
+# them X blanks after ten minutes and powers the panel down after twenty, and
+# on the official DSI display that is unrecoverable in a kiosk: the backlight
+# goes to bl_power=4, writes to it come back EIO while the panel is DPMS-off,
+# and with no keyboard attached nothing ever wakes it. The synth is still
+# running perfectly behind a dark screen.
+#
+# Done with X server flags rather than xset so the kiosk needs no extra
+# package -- x11-xserver-utils is not part of a minimal Raspberry Pi OS Lite.
+XSERVER_ARGS="-nolisten tcp -nocursor -s 0 -dpms"
 EXTRA_ARGS=""
 
 # shellcheck source=/dev/null
