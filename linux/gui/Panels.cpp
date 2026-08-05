@@ -548,7 +548,7 @@ static void drawSequencer(s1::Engine &engine, UiState &ui) {
         const float gridH = avail.y - blockTitleH() - kBlockPadY * 2.0f - 2.0f;
         BlockFlow right(ImGui::GetContentRegionAvail().x);
         right.begin("16-STEP SEQUENCER", gridW, gridH);
-        SequencerGrid(engine, totalSteps, ui.arpBeat, ImVec2(gridW, gridH));
+        SequencerGrid(engine, totalSteps, ui.arpBeat, ui.heldNoteCount, ImVec2(gridW, gridH));
         right.end();
         ImGui::EndGroup();
         return;
@@ -563,7 +563,7 @@ static void drawSequencer(s1::Engine &engine, UiState &ui) {
     const float gridH = ImGui::GetContentRegionAvail().y - blockTitleH() -
                         kBlockPadY * 2.0f - st.ItemSpacing.y - 2.0f;
     flow.begin("16-STEP SEQUENCER", gridW, gridH);
-    SequencerGrid(engine, totalSteps, ui.arpBeat, ImVec2(gridW, gridH));
+    SequencerGrid(engine, totalSteps, ui.arpBeat, ui.heldNoteCount, ImVec2(gridW, gridH));
     flow.end();
 }
 

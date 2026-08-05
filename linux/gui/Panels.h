@@ -60,6 +60,10 @@ struct UiState {
     // Live DSP state, refreshed from notifications
     bool heldNotes[128] = {false};
     int  arpBeat = -1;
+    /// Held notes as the kernel counted them, carried alongside the beat in
+    /// S1ArpBeatCounter. The sequencer LED needs it to tell "playing step n"
+    /// from "idle", the same way Conductor hands heldNoteCount to updateLED.
+    int  heldNoteCount = 0;
     int  voiceCount = 0;
 
     // Tunings

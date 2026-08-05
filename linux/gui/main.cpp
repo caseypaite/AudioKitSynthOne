@@ -39,6 +39,7 @@ public:
     }
     void arpBeatCounterDidChange(S1ArpBeatCounter counter) override {
         mUi.arpBeat = counter.beatCounter;
+        mUi.heldNoteCount = counter.heldNotesCount;
     }
     void playingNotesDidChange(PlayingNotes notes) override {
         int voices = 0;

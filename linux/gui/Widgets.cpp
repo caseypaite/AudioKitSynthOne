@@ -594,7 +594,8 @@ bool TouchPadXY(const char *id, const ImVec2 &size, float &x, float &y, bool lat
     return changed;
 }
 
-bool SequencerGrid(s1::Engine &engine, int totalSteps, int currentStep, const ImVec2 &size) {
+bool SequencerGrid(s1::Engine &engine, int totalSteps, int currentStep, int heldNotes,
+                   const ImVec2 &size) {
     bool changed = false;
 
     constexpr int kSteps = 16;
@@ -612,18 +613,26 @@ bool SequencerGrid(s1::Engine &engine, int totalSteps, int currentStep, const Im
                         ImGui::GetTextLineHeightWithSpacing();
     const float sliderH = size.y > 0.0f ? std::max(40.0f, size.y - fixed) : 64.0f;
 
-    // S1Sequencer::getArpBeatCount() hands out a free-running counter -- it is
-    // mBeatTime divided by the tempo multiplier, and nothing ever folds it back
-    // (a single held note walks it into the hundreds). Wrapping it is the UI's
-    // job, exactly as SequencerPanelController.updateLED does on iOS:
+    // Which step is lit, transcribed from SequencerPanelController.updateLED:
     //
-    //     let notePosition = (beatCounter + seqTotalSteps) % seqTotalSteps
+    //     if arpIsOn && arpIsSequencer && seqTotalSteps > 0 {
+    //         let notePosition = (beatCounter + seqTotalSteps) % seqTotalSteps
+    //         if heldNotes != 0 { light notePosition } else { light 0 }
+    //     }
     //
-    // Without this the lit step simply stopped once a held note outlasted one
-    // pass of the sequence, because no column index ever equalled the counter
-    // again. -1 is the "no beat reported yet" value and stays unlit.
-    const int wrapSteps = totalSteps > 0 ? totalSteps : kSteps;
-    const int litStep = currentStep >= 0 ? ((currentStep % wrapSteps) + wrapSteps) % wrapSteps : -1;
+    // Two things that condition is carrying. S1Sequencer::getArpBeatCount()
+    // hands out a free-running counter -- mBeatTime over the tempo multiplier,
+    // which nothing ever folds back, so a single held note walks it into the
+    // hundreds; wrapping it is the UI's job. And the counter stops being
+    // reported the moment the last note is released, so without the held-note
+    // test the LED would sit frozen on whichever step it happened to reach.
+    const bool arpOn = engine.getParameter(arpIsOn) > 0.0f;
+    const bool isSequencer = engine.getParameter(arpIsSequencer) > 0.0f;
+
+    int litStep = -1;
+    if (arpOn && isSequencer && totalSteps > 0) {
+        litStep = heldNotes != 0 ? ((currentStep % totalSteps) + totalSteps) % totalSteps : 0;
+    }
 
     ImGui::BeginGroup();
     ImGui::TextColored(ImColor(color::kTextDim), "STEP");

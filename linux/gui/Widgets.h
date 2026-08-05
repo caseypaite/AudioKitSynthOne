@@ -143,9 +143,12 @@ bool TouchPadXY(const char *id, const ImVec2 &size, float &x, float &y,
 /// 16-step sequencer grid, laid out as the iOS panel is: a vertical transpose
 /// slider per step (SequencerPanelController binds a VerticalSlider to each
 /// sequencerPatternNN), with the octave-boost and note-on buttons underneath.
-/// `currentStep` highlights the playing step; -1 for none. `size` is the whole
-/// grid; either axis at 0 falls back to natural sizing.
-bool SequencerGrid(s1::Engine &engine, int totalSteps, int currentStep,
+/// `currentStep` is the kernel's free-running beat counter, folded to a column
+/// here; `heldNotes` is how many notes are down, which decides between "playing
+/// step n" and the idle indicator on step 1. Nothing is lit unless the arp is
+/// on and in sequencer mode. `size` is the whole grid; either axis at 0 falls
+/// back to natural sizing.
+bool SequencerGrid(s1::Engine &engine, int totalSteps, int currentStep, int heldNotes,
                    const ImVec2 &size = ImVec2(0, 0));
 
 /// Playable keyboard. Returns the note under the pointer while held, else -1.
