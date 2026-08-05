@@ -154,7 +154,7 @@ int main(int argc, char **argv) {
     bool fullscreen = false;
     bool hideCursor = false;
     bool geometryGiven = false;
-    int  compactMode = -1;   // -1 = decide from the display, 0 = off, 1 = on
+    int  layoutOverride = -1;   // -1 = read it off the display, 0 = desktop, 1 = Pi
     std::string topPanelName, bottomPanelName;
 
     auto panelByName = [](const std::string &name, s1gui::Panel &out) {
@@ -178,8 +178,8 @@ int main(int argc, char **argv) {
         else if (arg == "--tunings") tuningsPath = next();
         else if (arg == "--top") topPanelName = next();
         else if (arg == "--bottom") bottomPanelName = next();
-        else if (arg == "--compact") compactMode = 1;
-        else if (arg == "--no-compact") compactMode = 0;
+        else if (arg == "--compact") layoutOverride = 1;
+        else if (arg == "--no-compact") layoutOverride = 0;
         else if (arg == "--geometry") {
             const std::string g = next();
             const size_t x = g.find('x');
@@ -199,7 +199,8 @@ int main(int argc, char **argv) {
                         "                    [--compact | --no-compact]\n"
                         "  PANEL: MAIN ENV PAD FX SEQ TUNE\n"
                         "  compact is chosen automatically on a display under\n"
-                        "  1000x620, such as the Raspberry Pi 7\" panel (800x480)\n");
+                        "  1000x620, such as the Raspberry Pi 7\" panel (800x480);\n"
+                        "  the header's PI VIEW button switches it while running\n");
             return 0;
         }
     }
@@ -234,6 +235,7 @@ int main(int argc, char **argv) {
     }
 
     s1gui::UiState ui;
+    ui.layoutOverride = layoutOverride;
     if (!topPanelName.empty()) panelByName(topPanelName, ui.topPanel);
     if (!bottomPanelName.empty()) panelByName(bottomPanelName, ui.bottomPanel);
 
@@ -350,9 +352,10 @@ int main(int argc, char **argv) {
         // Decide the density from what we are actually drawing on, so the same
         // binary suits a desktop window and the Pi's 800x480 panel, and adapts
         // if the window is resized. 1000x620 sits above 800x480 and below the
-        // smallest roomy layout that still works.
-        const bool wantCompact = (compactMode >= 0)
-                                     ? (compactMode == 1)
+        // smallest roomy layout that still works. An explicit choice -- the
+        // PI VIEW toggle, or --compact/--no-compact -- wins over the display.
+        const bool wantCompact = (ui.layoutOverride >= 0)
+                                     ? (ui.layoutOverride == 1)
                                      : (viewport->WorkSize.x < 1000.0f || viewport->WorkSize.y < 620.0f);
         if (wantCompact != ui.compact) {
             ui.compact = wantCompact;
@@ -363,12 +366,12 @@ int main(int argc, char **argv) {
             if (ui.compact) ui.showKeyboard = false;
         }
 
-        // The display decides the layout, so there is nothing to choose: a
-        // short screen has room for exactly one panel, a desktop has room for
-        // two and is better off showing them than hiding one behind a tab.
-        // Set every frame rather than on the threshold crossing above -- a
-        // desktop starts non-compact and never crosses it, so a transition-only
-        // assignment would leave this at its initial value.
+        // One panel or two follows the density: a short screen has room for
+        // exactly one, a desktop has room for two and is better off showing
+        // them than hiding one behind a tab. Set every frame rather than on the
+        // threshold crossing above -- a desktop starts non-compact and never
+        // crosses it, so a transition-only assignment would leave this at its
+        // initial value.
         ui.singlePanel = ui.compact;
 
 

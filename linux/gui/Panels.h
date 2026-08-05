@@ -25,14 +25,19 @@ struct UiState {
     bool  showKeyboard = true;
     bool  showPresets = false;
     /// One panel at a time, the way the iOS app does it, or two stacked.
-    /// Not a preference: it is set from `compact` each time the display
-    /// crosses the threshold. A short screen has room for one panel; a desktop
-    /// has room for two and shows both rather than hiding one behind a tab.
+    /// Follows `compact`: a short screen has room for one panel; a desktop has
+    /// room for two and shows both rather than hiding one behind a tab.
     bool  singlePanel = true;
-    /// Set from the framebuffer size each frame: a small display gets tighter
-    /// chrome and a two-row header. Knobs and buttons keep their size -- the
-    /// space comes out of padding, not out of the touch targets.
+    /// The layout actually being drawn. Compact gets tighter chrome, a two-row
+    /// header and one panel; knobs and buttons keep their size -- the space
+    /// comes out of padding, not out of the touch targets.
     bool  compact = false;
+    /// What decides `compact`: -1 reads it off the framebuffer each frame, 0
+    /// forces the desktop layout, 1 forces the Pi one. Set by `--compact` /
+    /// `--no-compact`, and by the header's PI VIEW toggle -- clicking that
+    /// leaves auto for good, since a display-driven layout that overrode the
+    /// button on the next resize would be the button not working.
+    int   layoutOverride = -1;
 
     // Keyboard
     int   firstOctave = 3;

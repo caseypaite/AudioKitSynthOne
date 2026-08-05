@@ -772,9 +772,25 @@ void DrawHeader(s1::Engine &engine, UiState &ui) {
         ui.showSaveDialog = true;
     }
 
-    // No layout button: the display decides. A desktop shows two stacked
-    // panels, a short screen shows one, and offering a choice only invited
-    // picking the arrangement that does not fit.
+    // Layout switch. The display still picks the opening layout; this is for
+    // seeing the Pi's arrangement on a desktop -- checking a change against the
+    // 800x480 panel without a Pi to hand. Clicking it fixes the choice for the
+    // session, so a later resize cannot undo what the button just did.
+    //
+    // It is drawn in both layouts, narrow label and all. Showing it only on the
+    // desktop would make it a one-way door: press once, land in the Pi layout,
+    // and the way back is gone.
+    ImGui::SameLine(0.0f, gapSmall);
+    bool piLayout = ui.compact;
+    if (ToggleValue(piLayout, wide ? "PI VIEW" : "PI", ImVec2(wide ? 92.0f : 44.0f, 0))) {
+        ui.layoutOverride = piLayout ? 1 : 0;
+        ui.notify(piLayout ? "Pi layout (800x480)" : "desktop layout");
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Draw the Raspberry Pi 7\" layout: one panel, tighter chrome.\n"
+                          "Press again for the desktop layout, which wants 1000x620\n"
+                          "or more -- on a smaller screen it will run off the edge.");
+    }
 
     ImGui::SameLine(0.0f, gapSmall);
     ToggleValue(ui.showKeyboard, wide ? "KEYBOARD" : "KEYS", ImVec2(wide ? 100.0f : 64.0f, 0));

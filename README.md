@@ -74,8 +74,9 @@ PaintCode vector artwork — so it covers all six panels but does not look like
 the iOS app. It lays itself out for the target display: the official Pi 7"
 panel is 800x480, and below 1000x620 the GUI switches to a two-row header, one
 panel at a time, a hidden on-screen keyboard, and tighter padding. On a desktop
-it shows two panels stacked instead. That is decided by the display rather than
-offered as a setting -- either arrangement is wrong on the other screen.
+it shows two panels stacked instead. The display picks which you start in, and
+a **PI VIEW** button in the header switches between them — mostly so the Pi's
+layout can be checked on a workstation without a Pi to hand.
 
 ### The six panels at 800x480
 

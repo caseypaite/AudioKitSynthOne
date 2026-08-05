@@ -382,18 +382,29 @@ treatment with more room to spend.
 
 ### One panel or two
 
-How many panels are on screen is decided by the display, not by the user:
+How many panels are on screen is decided by the display:
 
 | Display | Layout |
 | --- | --- |
 | Below 1000x620 | One panel, its own tab row, keyboard hidden. |
 | Desktop | Two panels stacked, UPPER and LOWER, each independently navigable. |
 
-There is no layout button and no `--layout` flag. Offering the choice only
-invited picking the arrangement that does not fit -- two panels on the 7" panel
-leave 116px each, and one panel on a desktop wastes half the screen. Side by
-side is gone entirely: panels are laid out wide, so splitting the width was the
-one arrangement that made every panel scroll.
+That is the *opening* layout. A **PI VIEW** toggle in the header switches
+between the two while running, and `--compact` / `--no-compact` fix the choice
+from the command line. The point of it is a desktop one: drawing the Pi's
+800x480 arrangement on a workstation, so a layout change can be checked against
+the target without a Pi to hand. Clicking it settles the layout for the rest of
+the session — once the user has said which they want, a window resize crossing
+the threshold must not overrule them.
+
+The toggle is drawn in both layouts even though it is narrow on the compact
+one, because showing it only on the desktop would make it a one-way door.
+Forcing the desktop layout onto a small screen is the arrangement that does not
+fit — the header alone wants ~1200px — so the button says so in its tooltip and
+leaves it to you.
+
+Side by side is gone entirely: panels are laid out wide, so splitting the width
+was the one arrangement that made every panel scroll.
 
 A stacked pane on a 900px screen is about 330px tall, so panels have to fit
 that as well as the Pi's 367px. Anything sized in absolute pixels needs to come
