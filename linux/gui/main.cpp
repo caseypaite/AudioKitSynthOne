@@ -130,7 +130,7 @@ void panelTabs(const char *id, const char *label, s1gui::Panel &current, s1gui::
                               : opposite ? ImColor(s1gui::color::kOnDim).Value
                                          : ImColor(s1gui::color::kTextDim).Value);
         ImGui::PushID(i);
-        if (ImGui::Button(s1gui::PanelName(panel), ImVec2(74, 0))) {
+        if (ImGui::Button(s1gui::PanelName(panel), s1gui::PanelTabSize())) {
             if (panel == other) {
                 other = current; // swap rather than show the same panel twice
             }
@@ -597,6 +597,15 @@ int main(int argc, char **argv) {
         const bool wantCompact = (compactMode >= 0)
                                      ? (compactMode == 1)
                                      : (viewport->WorkSize.x < 1000.0f || viewport->WorkSize.y < 620.0f);
+        // How much bigger than the 800x480 baseline this panel is, taken from
+        // whichever axis is tightest so nothing overflows the other one. The
+        // Waveshare 7" (1024x600) lands at 1.25; the official 7" panel stays at
+        // 1.0. Capped because past about 1.5 the block flow starts leaving
+        // whole shelves empty again, which is the problem it exists to fix.
+        const float roomScale =
+            std::min({viewport->WorkSize.x / 800.0f, viewport->WorkSize.y / 480.0f, 1.5f});
+        s1gui::SetCompactScale(roomScale);
+
         if (wantCompact != ui.compact) {
             ui.compact = wantCompact;
             applySpacing(ui.compact);

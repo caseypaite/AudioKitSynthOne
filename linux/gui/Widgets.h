@@ -58,6 +58,24 @@ bool LearnMode();
 void SetCompactWidgets(bool on);
 bool CompactWidgets();
 
+/// How much bigger than the 800x480 baseline the compact layout may draw.
+///
+/// Compact is a single decision -- one panel, tight chrome -- but the panels it
+/// has to serve are not one size. 800x480 and 1024x600 are both compact, and
+/// the second has 60% more pixels; drawn identically, that surplus turns into
+/// empty space below the last shelf rather than into bigger controls, because
+/// the extra width only packs the blocks into fewer rows.
+///
+/// So compact sizes scale with the panel. 1.0 is the 800x480 baseline; the
+/// caller derives it from the framebuffer (see SetCompactWidgets' caller) and
+/// it multiplies knob faces and tab buttons alike.
+void  SetCompactScale(float scale);
+float CompactScale();
+
+/// Size of one panel-selector tab, scaled for the display in use. Width covers
+/// the longest label; height is a touch target, not a text height.
+ImVec2 PanelTabSize();
+
 /// Knob diameter after compact scaling. Panels use it when they need to know
 /// how tall a row will be.
 float KnobDiameter(float requested = 46.0f);

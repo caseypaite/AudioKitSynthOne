@@ -77,6 +77,11 @@ panel at a time, a hidden on-screen keyboard, and tighter padding. On a desktop
 it shows two panels stacked instead. That is decided by the display rather than
 offered as a setting -- either arrangement is wrong on the other screen.
 
+Compact sizes then scale with the panel, so a roomier small display spends its
+extra pixels on bigger controls rather than on empty space: 800x480 is the
+baseline, and a Waveshare 7" (C) at 1024x600 gets knobs and panel tabs a
+quarter larger again. Both are tested on a Pi 4 running Bookworm.
+
 ### The six panels at 800x480
 
 ![The six panels — MAIN, ENV, PAD, FX, SEQ, TUNE — at 800x480](screenshots/panels.gif)

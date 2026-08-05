@@ -297,6 +297,38 @@ journalctl -u synthone-kiosk -f            # watch it come up
 It needs `xserver-xorg` and `xinit` (`apt install xserver-xorg xinit`) -- an X
 server, but no desktop on top of it.
 
+#### Get the panel overlay right first
+
+Tested end to end on a **Raspberry Pi 4 Model B, Raspberry Pi OS Bookworm
+(arm64), driving a Waveshare 7" DSI LCD (C) at 1024x600** -- the I2C-controlled
+variant. That panel needs its own overlay in `/boot/firmware/config.txt`:
+
+```
+dtoverlay=vc4-kms-dsi-waveshare-panel,7_0_inchC
+```
+
+Use the overlay that matches the panel, and only that one. Driving a Waveshare
+panel with the *official* display's overlay (`dtoverlay=vc4-kms-dsi-7inch`)
+fails in a way that wastes an afternoon: the DSI data lanes still work, so the
+panel is detected, takes a mode and renders -- but the official overlay binds
+`rpi_touchscreen_attiny` at 0x45, a chip a Waveshare panel does not have. Every
+backlight call then goes to a device that is not there:
+
+```
+panel-simple ...: [drm:drm_panel_enable] failed to enable backlight: -5
+```
+
+The result is a correctly rendered, permanently unlit screen -- indistinguishable
+from a dead display or a bad ribbon cable. `i2cget -y -f 10 0x45 0x86` returning
+`Read failed`, with the panel otherwise working, is the tell. Note also that
+`display_auto_detect=1` cannot rescue this: auto-detection identifies the panel
+over that same I2C link, so with no explicit overlay a Waveshare panel comes up
+with no DSI connector at all.
+
+The GUI adapts to whatever the panel reports, so 1024x600 gets larger knobs and
+tabs than 800x480 automatically -- see [Designing for
+800x480](#designing-for-800x480).
+
 There is no login prompt and no autologin getty to configure: the unit runs as
 the configured user under `PAMName=login`, so `logind` opens a real session for
 them -- `XDG_RUNTIME_DIR`, user services and all -- with no password and no
@@ -330,7 +362,7 @@ reinstalls:
 | Key | Default | Notes |
 | --- | --- | --- |
 | `BACKEND` | `portaudio` | ALSA directly, nothing to start first. `jack` if you run a server. |
-| `GEOMETRY` | empty | Empty fills the panel; the official 7" display is `800x480`. |
+| `GEOMETRY` | empty | Empty fills the panel: `800x480` on the official 7" display, `1024x600` on the Waveshare 7" (C). |
 | `TOP` / `BOTTOM` | empty | Which panel opens first: `MAIN ENV PAD FX SEQ TUNE`. |
 | `MIDI` | `all` | ALSA source as `CLIENT:PORT`, or everything. |
 | `HIDE_CURSOR` | `1` | Pointer off, for a touch panel. |
@@ -374,6 +406,22 @@ six panels. The stills are gitignored; the two GIFs are the tracked artefacts.
 The official Raspberry Pi 7" display is **800x480**, under a third of the
 pixels the roomy layout assumes. Below 1000x620 the GUI switches itself to a
 compact mode; `--compact` and `--no-compact` force the decision either way.
+
+Compact is one decision, but the panels it serves are not one size: 1024x600
+is also compact and has 60% more pixels than 800x480. Drawn identically that
+surplus becomes empty space under the last shelf, because the extra width only
+packs the same blocks into fewer rows -- so compact sizes scale with the panel.
+The scale is `min(width/800, height/480)`, capped at 1.5, taken from the
+tighter axis so nothing overflows the other one, and it multiplies knob faces
+and panel tabs alike. 800x480 sits at 1.0 and is drawn exactly as before;
+1024x600 lands at 1.25, taking MAIN's knobs from 72px to 90px and the panel
+tabs from 74px to 92px, both taller with it.
+
+Knobs are deliberately **not** capped at the size the panel asks for. That
+figure is the desktop size, chosen for a mouse; capping there left a 1024x600
+display with 200px of dead space below the last shelf. A finger is a coarser
+instrument than a pointer, so a touch panel with room to spare is right to draw
+larger than the desktop does.
 
 What changes, and why:
 
