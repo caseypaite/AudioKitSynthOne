@@ -284,6 +284,17 @@ if(WIN32)
     # reaches the same drivers; the port does not carry it.
     set(S1_JACK_LIB "")
 
+    # Both trees below predate CMake 4, which dropped compatibility with
+    # cmake_minimum_required() values under 3.5 -- PortAudio v19.7.0 asks for
+    # 2.8 and GLFW 3.4 for 3.4, so each aborts at project() on a current CMake.
+    # Neither is ours to patch and both are pinned to their last stable tags, so
+    # tell CMake to treat those declarations as 3.5.
+    #
+    # Scoped deliberately: it is set immediately before the two fetched
+    # subprojects and unset immediately after, so it never relaxes policy
+    # checking for our own targets.
+    set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+
     # PortAudio. WASAPI, WMME, DirectSound and WDMKS all build against the SDK
     # headers MinGW ships, so no external SDK is needed. ASIO is deliberately
     # absent: it needs Steinberg's licensed SDK, which cannot be redistributed.
@@ -308,6 +319,8 @@ if(WIN32)
     add_subdirectory("${GLFW_DIR}" "${CMAKE_BINARY_DIR}/_build/glfw" EXCLUDE_FROM_ALL)
     set(S1_GLFW_LIB glfw)
     set(S1_GL_LIB opengl32)
+
+    unset(CMAKE_POLICY_VERSION_MINIMUM)
 else()
     set(S1_MIDI_SOURCE host/AlsaMidi.cpp)
 

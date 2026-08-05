@@ -158,10 +158,14 @@ namespace {
 /// which is a different question from which speaker this machine uses -- the
 /// device must not follow a preset collection onto another box, so this path
 /// deliberately ignores that flag.
+/// Returned as a string, and every filesystem::path here is converted with an
+/// explicit .string(): on Windows path::value_type is wchar_t, so the implicit
+/// conversion that compiles on Linux is not available and neither is handing
+/// c_str() to fopen.
 std::string audioConfigPath() {
     const std::filesystem::path presets(s1::Engine::defaultUserDataDir());
     const std::filesystem::path root = presets.parent_path();
-    return (root.empty() ? std::filesystem::path(".") : root) / "audio.json";
+    return ((root.empty() ? std::filesystem::path(".") : root) / "audio.json").string();
 }
 
 /// Device names come from the driver and are not ours to trust as JSON.
@@ -224,9 +228,9 @@ void saveAudioConfig(const s1gui::UiState &ui) {
     json += "  \"bufferFrames\": " + std::to_string(ui.audioBufferFrames) + "\n";
     json += "}\n";
 
-    const std::filesystem::path path(audioConfigPath());
+    const std::string path = audioConfigPath();
     std::error_code ec;
-    std::filesystem::create_directories(path.parent_path(), ec);
+    std::filesystem::create_directories(std::filesystem::path(path).parent_path(), ec);
     if (FILE *f = std::fopen(path.c_str(), "wb")) {
         std::fwrite(json.data(), 1, json.size(), f);
         std::fclose(f);
