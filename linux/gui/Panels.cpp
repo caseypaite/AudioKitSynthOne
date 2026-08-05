@@ -392,6 +392,23 @@ static void drawEffects(s1::Engine &engine, UiState &ui) {
     // ceiling: at 68 the LFO shelf plus the routing block reaches 1420px and
     // the matrix wraps, which costs a whole shelf.
     constexpr float kK = 64.0f;
+
+    // ...but that reasoning is about 800x480 specifically. A wider compact
+    // panel reflows FX into three shelves instead of four, and the shelf it
+    // gets back is pure empty space at the bottom -- 145px of it at 1024x600,
+    // with 40px faces sitting in the middle of it. So once there is meaningfully
+    // more room than the baseline, FX takes a floor like every other panel and
+    // spends that shelf on bigger faces. 1.2 is the threshold because the
+    // reflow to three shelves is what makes it affordable, and that has
+    // happened by 1024x600 (1.25).
+    //
+    // 58 is the ceiling, measured at 1024x600: it draws a 72px face and still
+    // finishes in three shelves. 62 does not -- REVERB no longer fits beside
+    // the routing matrix, drops onto a shelf of its own, and the bottom row is
+    // clipped behind a scrollbar. 800x480 keeps the default floor and is
+    // pixel-identical to before.
+    const float fxFloor = CompactScale() >= 1.2f ? 58.0f : CompactKnobFloor();
+    KnobFloor fxKnobs(fxFloor);
     const float rowH = knobBlockH(1, kK);
 
     BlockFlow flow;
