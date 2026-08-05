@@ -384,6 +384,118 @@ To take the kiosk off without removing the app:
 sudo systemctl disable --now synthone-kiosk
 ```
 
+### Performance on Raspberry Pi 4
+
+Tested on a **Pi 4 Model B, Raspberry Pi OS Bookworm arm64,
+kernel 6.12.96+rpt-rpi-v8 (PREEMPT)**.
+
+#### Real-time audio thread
+
+The audio callback thread raises itself to **SCHED_FIFO priority 95** on its
+first invocation — the first moment it is certain to be on the correct thread.
+`--kiosk` enables this with two changes that work together:
+
+- The systemd unit carries `LimitRTPRIO=95` and `LimitMEMLOCK=infinity`, which
+  allow the process to escalate its own priority without root.
+- `install.sh --kiosk` writes `/etc/security/limits.d/synthone-audio.conf`
+  granting the same rights to the `audio` group, so manual runs over SSH work
+  too.
+
+Confirmed after install with `chrt -p <tid>`:
+
+```
+tid 1550  synthone  SCHED_FIFO  pri 95   ← audio callback thread
+tid 1549  synthone  SCHED_OTHER pri 0    ← MIDI thread
+tid 1545  synthone  SCHED_OTHER pri 0    ← main thread
+```
+
+The key metric is **scheduler wait time** — the time the RT thread spent ready
+but not running because the kernel had not given it the CPU yet. Across every
+preset tested this was `0.0%`. The audio thread is never preempted by a lower-
+priority process.
+
+#### CPU governor
+
+The kiosk unit pins all CPUs to `performance` via `ExecStartPre` (runs as root,
+no sudoers entry needed) and restores `ondemand` on `ExecStopPost`. On the Pi 4
+`performance` locks all four cores to 1500 MHz:
+
+```sh
+# verified via cpufreq sysfs
+cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor   # performance
+cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq   # 1500000
+```
+
+#### Scheduler jitter (cyclictest)
+
+With SCHED_FIFO active, 20 000 wakeup samples over 10 s at a 500 µs probe
+interval:
+
+```
+T: 0  P:95  I:500  C:20000  Min:3  Avg:5  Max:120  (all µs)
+```
+
+One 256-frame buffer period is **5 800 µs**. Worst-case jitter of 120 µs is
+**2 % of one period** — negligible on a stock PREEMPT kernel with no RT patch.
+
+#### DSP load per preset
+
+Measured via `/proc/<tid>/schedstat` (nanosecond resolution) over a 5-second
+window: PortAudio backend, `bcm2835 hw:0,0`, 256 frames at 44 100 Hz,
+SCHED\_FIFO/95, `performance` governor, one voice (`--test-note 60`).
+
+| Preset | CPU (1 core) | µs/callback | % of 5.80 ms budget |
+| --- | :---: | :---: | :---: |
+| Baseline — no note | 10.2 % | 750 | 12.9 % |
+| BB Cool Beans Epic Mega Pad | 14.8 % | 1 112 | 19.2 % |
+| BB 80s Cop Drama | 14.1 % | 1 035 | 17.8 % |
+| Buchla Bells of Brooklyn | 17.4 % | 1 283 | 22.1 % |
+| Synth Dream Piano | 17.6 % | 1 295 | 22.3 % |
+| ARP — Kiss Me, You Spy! | 19.5 % | 1 430 | 24.7 % |
+| Agent R Deckard (1 finger) | 21.4 % | 1 551 | 26.7 % |
+| Journey Thru Cosmos | 24.3 % | 2 426 | 41.8 % |
+| Synthwave 1974 | **26.2 %** | **2 605** | **44.9 %** |
+
+The 750 µs baseline includes the PortAudio→ALSA→bcm2835 firmware round-trip.
+The per-voice DSP cost is the difference above that floor. All presets leave
+comfortable headroom at one voice; the two heaviest (Journey Thru Cosmos,
+Synthwave 1974) approach the budget at full six-voice polyphony — use
+`--buffer 512` (11.6 ms) if you sustain full chords on those patches.
+
+`tools/bench-latency.sh` automates this measurement: start the synth, then
+run the script and it reports scheduling class, governor state and optionally a
+cyclictest histogram.
+
+#### Upgrading to an I2S DAC HAT
+
+The built-in 3.5 mm audio is a PWM peripheral driven through VideoCore GPU
+firmware. That firmware adds a hidden double-buffer beneath ALSA, which is
+why the output latency at 256 frames is **11.6 ms** rather than the
+5.8 ms the buffer math predicts — and why shrinking the buffer further does
+not help: the firmware floor is fixed.
+
+An I2S DAC HAT (PCM5122-based: HiFiBerry DAC+, JustBoom DAC, Pimoroni pHAT
+DAC) bypasses the firmware entirely. Audio goes CPU → DMA → DAC, so:
+
+| | bcm2835 (built-in) | I2S DAC HAT |
+| --- | :---: | :---: |
+| Output latency @ 256 frames | 11.6 ms | ≈ 5.8 ms |
+| Output latency @ 128 frames | 11.6 ms (firmware floor) | ≈ 3.0 ms |
+| Output latency @ 64 frames | 11.6 ms (cannot go lower) | ≈ 1.5 ms |
+| Clock jitter | High (PWM clock) | Low (PLL / crystal on DAC) |
+| CPU for transfer | Firmware overhead | ≈ 0 (DMA) |
+| Baseline CPU reduction | — | ~1–3 % |
+
+The I2S pins (GPIO 18–21) do not conflict with the Waveshare DSI display
+(ribbon connector) or its I2C backlight line (GPIO 2–3). Enable with one
+`dtoverlay` line in `/boot/firmware/config.txt` — `hifiberry-dacplus`,
+`justboom-dac`, or `hifiberry-dac` depending on the board — and `--device`
+to the new ALSA card.
+
+The RT scheduling and governor changes remove scheduler jitter as a latency
+source. I2S removes the firmware floor, allowing genuinely sub-5 ms
+note-to-sound latency on the Pi.
+
 ### Screenshots
 
 `tools/screenshots.sh` captures one still per panel and assembles the slideshow
