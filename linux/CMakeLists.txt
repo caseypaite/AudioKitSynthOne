@@ -2,32 +2,45 @@ cmake_minimum_required(VERSION 3.16)
 
 # Clang is the reference compiler for this port: it accepts the `#import`
 # directive and the Apple-flavoured idioms in the upstream sources without
-# argument. Override with -DCMAKE_CXX_COMPILER=... if you prefer GCC.
-if(NOT DEFINED CMAKE_C_COMPILER AND NOT DEFINED ENV{CC})
-    find_program(CLANG_C clang)
-    if(CLANG_C)
-        set(CMAKE_C_COMPILER "${CLANG_C}")
+# argument. Override with -DCMAKE_CXX_COMPILER=... if you prefer GCC, which
+# also compiles these sources -- it just spells the warning switches
+# differently (see the compile options on synthone_core below).
+#
+# Skipped when a toolchain file is in play: cross-compiling to Windows names
+# its own compilers, and picking up the host's clang there would be wrong.
+if(NOT CMAKE_TOOLCHAIN_FILE)
+    if(NOT DEFINED CMAKE_C_COMPILER AND NOT DEFINED ENV{CC})
+        find_program(CLANG_C clang)
+        if(CLANG_C)
+            set(CMAKE_C_COMPILER "${CLANG_C}")
+        endif()
     endif()
-endif()
-if(NOT DEFINED CMAKE_CXX_COMPILER AND NOT DEFINED ENV{CXX})
-    find_program(CLANG_CXX clang++)
-    if(CLANG_CXX)
-        set(CMAKE_CXX_COMPILER "${CLANG_CXX}")
+    if(NOT DEFINED CMAKE_CXX_COMPILER AND NOT DEFINED ENV{CXX})
+        find_program(CLANG_CXX clang++)
+        if(CLANG_CXX)
+            set(CMAKE_CXX_COMPILER "${CLANG_CXX}")
+        endif()
     endif()
 endif()
 
 project(synthone_linux LANGUAGES C CXX)
 
 #
-# AudioKit Synth One - Linux x86_64 port
+# AudioKit Synth One - Linux and Windows port
 #
 # Builds the original Synth One DSP kernel against a portable compatibility
-# layer (linux/compat) instead of AudioKit/CoreAudio, and hosts it on
-# JACK and/or PortAudio with ALSA sequencer MIDI input.
+# layer (linux/compat) instead of AudioKit/CoreAudio, and hosts it on:
+#
+#   Linux    JACK and/or PortAudio out, ALSA sequencer MIDI in
+#   Windows  PortAudio out (WASAPI/WMME/DirectSound), WinMM MIDI in
 #
 # The Apple sources under ../AudioKitSynthOne/DSP are compiled in place; only
 # the three files whose held-note bookkeeping is written in Objective-C are
 # replaced (see linux/src/S1DSPKernel+*.cpp).
+#
+# Windows binaries are cross-compiled from Linux with MinGW-w64; see
+# cmake/toolchain-x86_64-w64-mingw32.cmake and build-windows.sh. Nothing here
+# is Windows-native -- there is no MSVC path.
 #
 
 set(CMAKE_CXX_STANDARD 17)
@@ -45,39 +58,59 @@ set(CMAKE_C_FLAGS_RELEASE "-O2 -g")
 find_package(Threads REQUIRED)
 
 # ---------------------------------------------------------------------------
+# Fetching third-party sources
+#
+# Dependencies are fetched into the CMake binary dir at configure time, never
+# into the source tree. A shallow fetch of one revision is used rather than
+# FetchContent so an offline build can point -D<NAME>_ROOT at a prebuilt tree
+# and skip the network entirely.
+# ---------------------------------------------------------------------------
+
+function(s1_fetch_git out_dir name url rev sentinel)
+    string(TOUPPER "${name}" upper)
+    set(root "${${upper}_ROOT}")
+    if(root)
+        set(dir "${root}")
+    else()
+        set(dir "${CMAKE_BINARY_DIR}/_deps/${name}")
+    endif()
+
+    if(NOT EXISTS "${dir}/${sentinel}")
+        message(STATUS "Fetching ${name} into ${dir}")
+        execute_process(COMMAND ${CMAKE_COMMAND} -E make_directory "${dir}")
+        execute_process(COMMAND git init -q .
+            COMMAND_ERROR_IS_FATAL ANY WORKING_DIRECTORY "${dir}")
+        execute_process(COMMAND git fetch --depth 1 -q "${url}" "${rev}"
+            COMMAND_ERROR_IS_FATAL ANY WORKING_DIRECTORY "${dir}")
+        execute_process(COMMAND git checkout -q FETCH_HEAD
+            COMMAND_ERROR_IS_FATAL ANY WORKING_DIRECTORY "${dir}")
+    endif()
+
+    set(${out_dir} "${dir}" PARENT_SCOPE)
+endfunction()
+
+# ---------------------------------------------------------------------------
 # Soundpipe
 #
 # Not packaged on Arch, so it is fetched and built into the CMake binary dir at
 # configure time. Point -DSOUNDPIPE_ROOT at a prebuilt tree to build offline.
 # ---------------------------------------------------------------------------
 
-set(SOUNDPIPE_GIT "https://github.com/PaulBatchelor/Soundpipe.git")
-set(SOUNDPIPE_REV "3efb43bdabd0ed23b17c694292b5a79f1692a3ea")
 set(SOUNDPIPE_ROOT "" CACHE PATH "Prebuilt Soundpipe tree (skips fetching)")
+s1_fetch_git(SOUNDPIPE_DIR soundpipe
+    "https://github.com/PaulBatchelor/Soundpipe.git"
+    "3efb43bdabd0ed23b17c694292b5a79f1692a3ea"
+    "Makefile")
 
-if(SOUNDPIPE_ROOT STREQUAL "")
-    set(SOUNDPIPE_DIR "${CMAKE_BINARY_DIR}/_deps/soundpipe")
-else()
-    set(SOUNDPIPE_DIR "${SOUNDPIPE_ROOT}")
-endif()
-
-if(NOT EXISTS "${SOUNDPIPE_DIR}/Makefile")
-    message(STATUS "Fetching Soundpipe into ${SOUNDPIPE_DIR}")
-    execute_process(
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${SOUNDPIPE_DIR}"
-        RESULT_VARIABLE _sp_rc)
-    execute_process(
-        COMMAND git init -q .
-        COMMAND_ERROR_IS_FATAL ANY
-        WORKING_DIRECTORY "${SOUNDPIPE_DIR}")
-    execute_process(
-        COMMAND git fetch --depth 1 -q "${SOUNDPIPE_GIT}" "${SOUNDPIPE_REV}"
-        COMMAND_ERROR_IS_FATAL ANY
-        WORKING_DIRECTORY "${SOUNDPIPE_DIR}")
-    execute_process(
-        COMMAND git checkout -q FETCH_HEAD
-        COMMAND_ERROR_IS_FATAL ANY
-        WORKING_DIRECTORY "${SOUNDPIPE_DIR}")
+# Soundpipe builds with its own Makefile, so cross-compiling means handing it
+# the target's compiler and archiver explicitly -- it has no notion of a
+# toolchain file. Nothing else about it is host-specific.
+set(_sp_make_args "")
+if(CMAKE_CROSSCOMPILING)
+    list(APPEND _sp_make_args
+        "CC=${CMAKE_C_COMPILER}"
+        "AR=${CMAKE_AR}"
+        "RANLIB=${CMAKE_RANLIB}")
 endif()
 
 if(NOT EXISTS "${SOUNDPIPE_DIR}/libsoundpipe.a")
@@ -93,8 +126,10 @@ if(NOT EXISTS "${SOUNDPIPE_DIR}/libsoundpipe.a")
     if(_sp_jobs EQUAL 0)
         set(_sp_jobs 4)
     endif()
+    # Only libsoundpipe.a: the default target also builds util/wav2smp, which is
+    # of no use here and does not cross-compile cleanly.
     execute_process(
-        COMMAND make NO_LIBSNDFILE=1 -j${_sp_jobs}
+        COMMAND make NO_LIBSNDFILE=1 ${_sp_make_args} -j${_sp_jobs} libsoundpipe.a
         RESULT_VARIABLE _sp_build_rc
         OUTPUT_QUIET
         WORKING_DIRECTORY "${SOUNDPIPE_DIR}")
@@ -154,6 +189,7 @@ add_library(synthone_core STATIC
     src/S1AudioUnit.cpp
     src/Json.cpp
     src/Engine.cpp
+    src/PlatformPaths.cpp
     "src/S1DSPKernel+startStopNotes.cpp"
     "src/S1DSPKernel+reset.cpp"
     "src/S1DSPKernel+didChanges.cpp"
@@ -186,12 +222,31 @@ target_compile_options(synthone_core PRIVATE
     "-include${CMAKE_CURRENT_SOURCE_DIR}/compat/S1Prefix.h"
     -Wall
     # Upstream idioms that are fine but noisy outside Xcode.
-    -Wno-import-preprocessor-directive-pedantic  # #import in C++
-    -Wno-missing-declarations                    # typedef AK_ENUM(x) {...};
-    -Wno-reorder-ctor                            # kernel ctor init-list order
     -Wno-unused-variable
     -Wno-unused-but-set-variable
 )
+
+# The two compilers spell the #import and constructor-ordering warnings
+# differently, and each rejects the other's switch.
+#
+# The #import suppression is PUBLIC because S1Parameter.h imports AKInterop.h,
+# so every consumer of Engine.h meets the directive too -- keeping it PRIVATE
+# leaves the warning firing in host/main.cpp and synthone_offline.cpp.
+#
+# The constructor-ordering switches are C++-only and warn when handed to the
+# C compiler, so they are gated on the language being compiled.
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    target_compile_options(synthone_core
+        PUBLIC  -Wno-import-preprocessor-directive-pedantic  # #import in C++
+        PRIVATE -Wno-missing-declarations                    # typedef AK_ENUM(x) {...};
+                $<$<COMPILE_LANGUAGE:CXX>:-Wno-reorder-ctor> # kernel ctor init-list order
+    )
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    target_compile_options(synthone_core
+        PUBLIC  -Wno-deprecated                        # GCC's "#import is deprecated"
+        PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wno-reorder> # kernel ctor init-list order
+    )
+endif()
 
 # ---------------------------------------------------------------------------
 # synthone-offline: hardware-free renderer / smoke test
@@ -201,49 +256,129 @@ add_executable(synthone-offline tools/synthone_offline.cpp)
 target_link_libraries(synthone-offline PRIVATE synthone_core)
 
 # ---------------------------------------------------------------------------
-# synthone: standalone host (JACK and/or PortAudio out, ALSA seq MIDI in)
+# Platform dependencies
+#
+# Linux takes its audio, MIDI and windowing libraries from the system through
+# pkg-config. Windows has no such package manager, so PortAudio and GLFW are
+# cross-built from source into the binary dir, the way Soundpipe and ImGui
+# already are.
+#
+# Both branches resolve into the same vocabulary, so the target definitions
+# below are written once:
+#
+#   S1_MIDI_SOURCE     the MidiInput implementation for this platform
+#   S1_MIDI_LIBS       what that implementation links against
+#   S1_MIDI_AVAILABLE  false when the platform's MIDI library is missing
+#   S1_JACK_LIB        JACK, or empty when unavailable
+#   S1_PORTAUDIO_LIB   PortAudio, or empty when unavailable
+#   S1_GLFW_LIB        GLFW, or empty when unavailable
+#   S1_GL_LIB          the OpenGL loader library
 # ---------------------------------------------------------------------------
 
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(JACK IMPORTED_TARGET jack)
-pkg_check_modules(GLFW IMPORTED_TARGET glfw3)
-pkg_check_modules(GL IMPORTED_TARGET gl)
-pkg_check_modules(PORTAUDIO IMPORTED_TARGET portaudio-2.0)
-pkg_check_modules(ALSA IMPORTED_TARGET alsa)
+if(WIN32)
+    set(S1_MIDI_SOURCE host/WinMidi.cpp)
+    set(S1_MIDI_LIBS winmm)
+    set(S1_MIDI_AVAILABLE TRUE)
 
-if(NOT ALSA_FOUND)
-    message(WARNING "alsa-lib not found -- skipping the standalone host. "
-                    "Install alsa-lib to build 'synthone'.")
-elseif(NOT JACK_FOUND AND NOT PORTAUDIO_FOUND)
+    # JACK exists on Windows but is a niche install there, and PortAudio already
+    # reaches the same drivers; the port does not carry it.
+    set(S1_JACK_LIB "")
+
+    # PortAudio. WASAPI, WMME, DirectSound and WDMKS all build against the SDK
+    # headers MinGW ships, so no external SDK is needed. ASIO is deliberately
+    # absent: it needs Steinberg's licensed SDK, which cannot be redistributed.
+    set(PORTAUDIO_ROOT "" CACHE PATH "Prebuilt PortAudio tree (skips fetching)")
+    s1_fetch_git(PORTAUDIO_DIR portaudio
+        "https://github.com/PortAudio/portaudio.git" "v19.7.0" "CMakeLists.txt")
+    set(PA_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+    set(PA_BUILD_STATIC ON CACHE BOOL "" FORCE)
+    set(PA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(PA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    add_subdirectory("${PORTAUDIO_DIR}" "${CMAKE_BINARY_DIR}/_build/portaudio" EXCLUDE_FROM_ALL)
+    set(S1_PORTAUDIO_LIB portaudio_static)
+    message(STATUS "Host backend: PortAudio (cross-built)")
+
+    # GLFW.
+    set(GLFW_ROOT "" CACHE PATH "Prebuilt GLFW tree (skips fetching)")
+    s1_fetch_git(GLFW_DIR glfw "https://github.com/glfw/glfw.git" "3.4" "CMakeLists.txt")
+    set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+    set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
+    add_subdirectory("${GLFW_DIR}" "${CMAKE_BINARY_DIR}/_build/glfw" EXCLUDE_FROM_ALL)
+    set(S1_GLFW_LIB glfw)
+    set(S1_GL_LIB opengl32)
+else()
+    set(S1_MIDI_SOURCE host/AlsaMidi.cpp)
+
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(JACK IMPORTED_TARGET jack)
+    pkg_check_modules(GLFW IMPORTED_TARGET glfw3)
+    pkg_check_modules(GL IMPORTED_TARGET gl)
+    pkg_check_modules(PORTAUDIO IMPORTED_TARGET portaudio-2.0)
+    pkg_check_modules(ALSA IMPORTED_TARGET alsa)
+
+    if(ALSA_FOUND)
+        set(S1_MIDI_LIBS PkgConfig::ALSA)
+        set(S1_MIDI_AVAILABLE TRUE)
+    else()
+        set(S1_MIDI_AVAILABLE FALSE)
+        message(WARNING "alsa-lib not found -- skipping the standalone host. "
+                        "Install alsa-lib to build 'synthone'.")
+    endif()
+
+    set(S1_JACK_LIB "")
+    if(JACK_FOUND)
+        set(S1_JACK_LIB PkgConfig::JACK)
+        message(STATUS "Host backend: JACK")
+    endif()
+    set(S1_PORTAUDIO_LIB "")
+    if(PORTAUDIO_FOUND)
+        set(S1_PORTAUDIO_LIB PkgConfig::PORTAUDIO)
+        message(STATUS "Host backend: PortAudio")
+    endif()
+
+    set(S1_GLFW_LIB "")
+    set(S1_GL_LIB "")
+    if(GLFW_FOUND AND GL_FOUND)
+        set(S1_GLFW_LIB PkgConfig::GLFW)
+        set(S1_GL_LIB PkgConfig::GL)
+    endif()
+endif()
+
+# ---------------------------------------------------------------------------
+# synthone: standalone host
+# ---------------------------------------------------------------------------
+
+if(NOT S1_MIDI_AVAILABLE)
+    # already warned about above
+elseif(NOT S1_JACK_LIB AND NOT S1_PORTAUDIO_LIB)
     message(WARNING "Neither JACK nor PortAudio found -- skipping the standalone host. "
                     "Install pipewire-jack (or jack2) and/or portaudio.")
 else()
-    set(HOST_SOURCES
-        host/main.cpp
+    # Everything that both the CLI host and the GUI need in order to make sound.
+    add_library(synthone_host STATIC
         host/AudioBackend.cpp
-        host/AlsaMidi.cpp
+        ${S1_MIDI_SOURCE}
     )
-    if(JACK_FOUND)
-        list(APPEND HOST_SOURCES host/JackBackend.cpp)
+    target_include_directories(synthone_host PUBLIC host)
+    target_link_libraries(synthone_host PUBLIC synthone_core ${S1_MIDI_LIBS} Threads::Threads)
+    target_compile_options(synthone_host PRIVATE -Wall)
+
+    if(S1_JACK_LIB)
+        target_sources(synthone_host PRIVATE host/JackBackend.cpp)
+        target_compile_definitions(synthone_host PUBLIC S1_HAVE_JACK)
+        target_link_libraries(synthone_host PUBLIC ${S1_JACK_LIB})
     endif()
-    if(PORTAUDIO_FOUND)
-        list(APPEND HOST_SOURCES host/PortAudioBackend.cpp)
+    if(S1_PORTAUDIO_LIB)
+        target_sources(synthone_host PRIVATE host/PortAudioBackend.cpp)
+        target_compile_definitions(synthone_host PUBLIC S1_HAVE_PORTAUDIO)
+        target_link_libraries(synthone_host PUBLIC ${S1_PORTAUDIO_LIB})
     endif()
 
-    add_executable(synthone ${HOST_SOURCES})
-    target_link_libraries(synthone PRIVATE synthone_core PkgConfig::ALSA Threads::Threads)
+    add_executable(synthone host/main.cpp)
+    target_link_libraries(synthone PRIVATE synthone_host)
     target_compile_options(synthone PRIVATE -Wall)
-
-    if(JACK_FOUND)
-        target_link_libraries(synthone PRIVATE PkgConfig::JACK)
-        target_compile_definitions(synthone PRIVATE S1_HAVE_JACK)
-        message(STATUS "Host backend: JACK")
-    endif()
-    if(PORTAUDIO_FOUND)
-        target_link_libraries(synthone PRIVATE PkgConfig::PORTAUDIO)
-        target_compile_definitions(synthone PRIVATE S1_HAVE_PORTAUDIO)
-        message(STATUS "Host backend: PortAudio")
-    endif()
 
     # -----------------------------------------------------------------------
     # synthone-gui: full graphical front end
@@ -252,25 +387,10 @@ else()
     # third-party is written into the source tree.
     # -----------------------------------------------------------------------
 
-    if(GLFW_FOUND AND GL_FOUND)
-        set(IMGUI_REV "v1.91.5")
-        set(IMGUI_DIR "${CMAKE_BINARY_DIR}/_deps/imgui")
+    if(S1_GLFW_LIB AND S1_GL_LIB)
         set(IMGUI_ROOT "" CACHE PATH "Prebuilt Dear ImGui tree (skips fetching)")
-        if(NOT IMGUI_ROOT STREQUAL "")
-            set(IMGUI_DIR "${IMGUI_ROOT}")
-        endif()
-
-        if(NOT EXISTS "${IMGUI_DIR}/imgui.cpp")
-            message(STATUS "Fetching Dear ImGui into ${IMGUI_DIR}")
-            execute_process(COMMAND ${CMAKE_COMMAND} -E make_directory "${IMGUI_DIR}")
-            execute_process(COMMAND git init -q .
-                COMMAND_ERROR_IS_FATAL ANY WORKING_DIRECTORY "${IMGUI_DIR}")
-            execute_process(
-                COMMAND git fetch --depth 1 -q https://github.com/ocornut/imgui.git ${IMGUI_REV}
-                COMMAND_ERROR_IS_FATAL ANY WORKING_DIRECTORY "${IMGUI_DIR}")
-            execute_process(COMMAND git checkout -q FETCH_HEAD
-                COMMAND_ERROR_IS_FATAL ANY WORKING_DIRECTORY "${IMGUI_DIR}")
-        endif()
+        s1_fetch_git(IMGUI_DIR imgui
+            "https://github.com/ocornut/imgui.git" "v1.91.5" "imgui.cpp")
 
         add_library(imgui STATIC
             "${IMGUI_DIR}/imgui.cpp"
@@ -281,29 +401,25 @@ else()
             "${IMGUI_DIR}/backends/imgui_impl_opengl3.cpp"
         )
         target_include_directories(imgui PUBLIC "${IMGUI_DIR}" "${IMGUI_DIR}/backends")
-        target_link_libraries(imgui PUBLIC PkgConfig::GLFW PkgConfig::GL)
+        target_link_libraries(imgui PUBLIC ${S1_GLFW_LIB} ${S1_GL_LIB})
 
         add_executable(synthone-gui
             gui/main.cpp
             gui/Widgets.cpp
             gui/Panels.cpp
-            host/AudioBackend.cpp
-            host/AlsaMidi.cpp
         )
-        if(JACK_FOUND)
-            target_sources(synthone-gui PRIVATE host/JackBackend.cpp)
-            target_compile_definitions(synthone-gui PRIVATE S1_HAVE_JACK)
-            target_link_libraries(synthone-gui PRIVATE PkgConfig::JACK)
-        endif()
-        if(PORTAUDIO_FOUND)
-            target_sources(synthone-gui PRIVATE host/PortAudioBackend.cpp)
-            target_compile_definitions(synthone-gui PRIVATE S1_HAVE_PORTAUDIO)
-            target_link_libraries(synthone-gui PRIVATE PkgConfig::PORTAUDIO)
-        endif()
-        target_include_directories(synthone-gui PRIVATE host gui)
-        target_link_libraries(synthone-gui
-            PRIVATE synthone_core imgui PkgConfig::ALSA Threads::Threads)
+        target_include_directories(synthone-gui PRIVATE gui)
+        target_link_libraries(synthone-gui PRIVATE synthone_host imgui)
         target_compile_options(synthone-gui PRIVATE -Wall)
+
+        # Left as a console application on Windows: the GUI reports backend and
+        # GLFW failures on stderr, and with -mwindows those go nowhere, which
+        # turns "no audio device" into a window that silently does nothing.
+        option(S1_WIN32_GUI_CONSOLE "Keep a console attached to synthone-gui on Windows" ON)
+        if(WIN32 AND NOT S1_WIN32_GUI_CONSOLE)
+            set_target_properties(synthone-gui PROPERTIES WIN32_EXECUTABLE TRUE)
+        endif()
+
         message(STATUS "GUI: Dear ImGui + GLFW")
     else()
         message(WARNING "glfw3/gl not found -- skipping synthone-gui.")

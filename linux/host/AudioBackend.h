@@ -52,6 +52,12 @@ public:
 std::vector<std::string> availableBackends();
 
 /// Create a backend by name. Returns nullptr and fills `error` if unavailable.
-std::unique_ptr<AudioBackend> makeBackend(const std::string &name, std::string &error);
+///
+/// `hostApi` narrows PortAudio to one of the driver families it wraps
+/// ("wasapi", "directsound", "mme", "alsa", ...); empty means "choose", which
+/// on Windows prefers WASAPI over the MME device PortAudio would otherwise
+/// default to. It is ignored by backends that wrap a single driver, i.e. JACK.
+std::unique_ptr<AudioBackend> makeBackend(const std::string &name, const std::string &hostApi,
+                                          std::string &error);
 
 } // namespace s1

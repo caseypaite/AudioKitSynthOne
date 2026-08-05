@@ -7,15 +7,20 @@
 
 ---
 
-## About this fork: a Linux / Raspberry Pi port
+## About this fork: a Linux / Raspberry Pi / Windows port
 
-This fork adds a native Linux build of Synth One under [`linux/`](linux/). The
-original app is iOS-only and needs macOS and Xcode to compile; this port
-compiles the original C++/Objective-C++ DSP sources in place against a
-compatibility layer that stands in for AudioKit, CoreAudio and
-TheAmazingAudioEngine, and hosts them on JACK or PortAudio with ALSA sequencer
-MIDI. The synthesis engine is the real thing — the same kernel, note state and
-preset banks — not a reimplementation.
+This fork adds native **Linux and Windows** builds of Synth One under
+[`linux/`](linux/). The original app is iOS-only and needs macOS and Xcode to
+compile; this port compiles the original C++/Objective-C++ DSP sources in place
+against a compatibility layer that stands in for AudioKit, CoreAudio and
+TheAmazingAudioEngine. The synthesis engine is the real thing — the same
+kernel, note state and preset banks — not a reimplementation, and it renders
+bit-identical audio on both platforms.
+
+| | audio out | MIDI in |
+| --- | --- | --- |
+| Linux (x86_64, aarch64) | JACK and/or PortAudio | ALSA sequencer |
+| Windows (x86_64) | PortAudio (WASAPI/DirectSound/MME/WDMKS) | WinMM |
 
 **The port was written with [Claude](https://claude.ai), using Anthropic's
 Claude Code.** That includes the compatibility layer, the JACK/PortAudio/ALSA
@@ -41,7 +46,14 @@ container under qemu emulation and can package the result:
 cd linux
 cmake -S . -B build -G Ninja && cmake --build build   # native x86_64
 ./build-arm64.sh --package                            # aarch64 build + dist/ zip
+./build-windows.sh --package                          # Windows build + dist/ zip
 ```
+
+Windows binaries are cross-compiled from the same Linux workstation with
+MinGW-w64 — there is no MSVC project and nothing in the build runs on Windows.
+Everything third-party is linked statically, so the result imports nothing but
+Windows' own DLLs and needs no redistributable. See
+[`linux/README.md`](linux/README.md#windows-x86_64) for the details.
 
 Three binaries come out: `synthone-gui` (touch-friendly Dear ImGui front end),
 `synthone` (headless, MIDI-driven), and `synthone-offline` (renders a WAV with
@@ -185,7 +197,7 @@ any hints about what could be improved.
 ### This folder's contents
 
 * `AudioKitSynthOne/` - This folder contains most of the source code
-* `linux/` - The Linux / Raspberry Pi port: compatibility layer, JACK/PortAudio host, Dear ImGui front end and build tooling (see [its README](linux/README.md))
+* `linux/` - The Linux / Raspberry Pi / Windows port: compatibility layer, JACK/PortAudio/WinMM hosts, Dear ImGui front end, and build and cross-compile tooling (see [its README](linux/README.md))
 * `AudioKitSynthOne.xcodeproj` - This file is a part of the workspace, which you should open instead
 * `AudioKitSynthOne.xcworkspace` - This is the file you should open with Xcode, it contains reference to both the project files for the synth code and associated Pods
 * `OneSignalNotificationServiceExtension/` - code for a third party extension we use

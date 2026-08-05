@@ -18,7 +18,7 @@
 
 #include <GLFW/glfw3.h>
 
-#include "AlsaMidi.h"
+#include "MidiInput.h"
 #include "AudioBackend.h"
 #include "Engine.h"
 #include "Panels.h"
@@ -145,10 +145,11 @@ void panelTabs(const char *id, const char *label, s1gui::Panel &current, s1gui::
 
 int main(int argc, char **argv) {
     std::string backendName;
-    std::string resourceDir = S1_DEFAULT_RESOURCE_DIR;
+    std::string hostApi;
+    std::string resourceDir = s1::Engine::defaultResourceDir();
     std::string userDir;
     std::string midiSpec = "all";
-    std::string tuningsPath = S1_TUNINGS_JSON;
+    std::string tuningsPath = s1::Engine::defaultTuningsPath();
     int windowWidth = 1440, windowHeight = 900;
     bool fullscreen = false;
     bool hideCursor = false;
@@ -170,6 +171,7 @@ int main(int argc, char **argv) {
         const std::string arg = argv[i];
         auto next = [&]() -> std::string { return (i + 1 < argc) ? argv[++i] : std::string(); };
         if (arg == "--backend") backendName = next();
+        else if (arg == "--host-api") hostApi = next();
         else if (arg == "--resources") resourceDir = next();
         else if (arg == "--user-dir") userDir = next();
         else if (arg == "--midi") midiSpec = next();
@@ -189,7 +191,8 @@ int main(int argc, char **argv) {
         } else if (arg == "--fullscreen") fullscreen = true;
         else if (arg == "--hide-cursor") hideCursor = true;
         else if (arg == "-h" || arg == "--help") {
-            std::printf("usage: synthone-gui [--backend jack|portaudio] [--resources DIR]\n"
+            std::printf("usage: synthone-gui [--backend jack|portaudio] [--host-api NAME]\n"
+                        "       [--resources DIR]\n"
                         "                    [--midi CLIENT:PORT|all] [--geometry WxH]\n"
                         "                    [--top PANEL] [--bottom PANEL]\n"
                         "                    [--fullscreen] [--hide-cursor]\n"
@@ -211,7 +214,7 @@ int main(int argc, char **argv) {
     if (backendName.empty()) backendName = backends.front();
 
     std::string error;
-    auto backend = s1::makeBackend(backendName, error);
+    auto backend = s1::makeBackend(backendName, hostApi, error);
     if (!backend || !backend->open(0, 0, 0.0, error)) {
         std::fprintf(stderr, "error: %s\n", error.c_str());
         return 1;
@@ -256,7 +259,7 @@ int main(int argc, char **argv) {
     engine.setObserver(&observer);
 
     s1::MidiQueue midiQueue;
-    s1::AlsaMidiInput midi;
+    s1::MidiInput midi;
     std::string midiStatus = "unavailable";
     if (midi.open("SynthOne", error)) {
         std::string ignored;

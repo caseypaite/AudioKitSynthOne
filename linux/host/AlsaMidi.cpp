@@ -2,8 +2,11 @@
 //  AlsaMidi.cpp
 //  AudioKitSynthOne - Linux port
 //
+//  The Linux implementation of MidiInput (see MidiInput.h). WinMidi.cpp is the
+//  Windows counterpart.
+//
 
-#include "AlsaMidi.h"
+#include "MidiInput.h"
 
 #include <alsa/asoundlib.h>
 
@@ -13,7 +16,7 @@
 
 namespace s1 {
 
-AlsaMidiInput::~AlsaMidiInput() {
+MidiInput::~MidiInput() {
     stop();
     if (mSeq != nullptr) {
         snd_seq_close(static_cast<snd_seq_t *>(mSeq));
@@ -21,7 +24,7 @@ AlsaMidiInput::~AlsaMidiInput() {
     }
 }
 
-bool AlsaMidiInput::open(const std::string &clientName, std::string &error) {
+bool MidiInput::open(const std::string &clientName, std::string &error) {
     snd_seq_t *seq = nullptr;
     const int rc = snd_seq_open(&seq, "default", SND_SEQ_OPEN_INPUT, 0);
     if (rc < 0) {
@@ -48,7 +51,7 @@ bool AlsaMidiInput::open(const std::string &clientName, std::string &error) {
     return true;
 }
 
-bool AlsaMidiInput::connect(const std::string &spec, std::string &error) {
+bool MidiInput::connect(const std::string &spec, std::string &error) {
     if (spec.empty() || mSeq == nullptr) return true;
 
     snd_seq_t *seq = static_cast<snd_seq_t *>(mSeq);
@@ -96,7 +99,7 @@ bool AlsaMidiInput::connect(const std::string &spec, std::string &error) {
     }
 }
 
-std::vector<MidiSource> AlsaMidiInput::listSources() {
+std::vector<MidiSource> MidiInput::listSources() {
     std::vector<MidiSource> sources;
 
     snd_seq_t *seq = nullptr;
@@ -122,6 +125,7 @@ std::vector<MidiSource> AlsaMidiInput::listSources() {
             MidiSource source;
             source.client = client;
             source.port = snd_seq_port_info_get_port(portInfo);
+            source.id = std::to_string(source.client) + ":" + std::to_string(source.port);
             source.name = std::string(snd_seq_client_info_get_name(clientInfo)) + " / " +
                           snd_seq_port_info_get_name(portInfo);
             sources.push_back(source);
@@ -132,19 +136,19 @@ std::vector<MidiSource> AlsaMidiInput::listSources() {
     return sources;
 }
 
-void AlsaMidiInput::start(MidiQueue *queue) {
+void MidiInput::start(MidiQueue *queue) {
     if (mSeq == nullptr || mRunning.load()) return;
     mQueue = queue;
     mRunning.store(true);
-    mThread = std::thread(&AlsaMidiInput::run, this);
+    mThread = std::thread(&MidiInput::run, this);
 }
 
-void AlsaMidiInput::stop() {
+void MidiInput::stop() {
     if (!mRunning.exchange(false)) return;
     if (mThread.joinable()) mThread.join();
 }
 
-void AlsaMidiInput::run() {
+void MidiInput::run() {
     snd_seq_t *seq = static_cast<snd_seq_t *>(mSeq);
 
     const int pollCount = snd_seq_poll_descriptors_count(seq, POLLIN);

@@ -1,18 +1,34 @@
-# AudioKit Synth One — Linux x86_64 port
+# AudioKit Synth One — Linux and Windows port
 
-A native Linux build of the Synth One **synthesis engine**, plus a standalone
-host with JACK/PortAudio output and ALSA sequencer MIDI input.
+A native build of the Synth One **synthesis engine** for Linux (x86_64 and
+aarch64) and Windows (x86_64), plus a standalone host and a graphical front end.
+
+| | audio out | MIDI in |
+| --- | --- | --- |
+| Linux | JACK and/or PortAudio | ALSA sequencer |
+| Windows | PortAudio (WASAPI/DirectSound/MME/WDMKS) | WinMM |
 
 The DSP is the real thing: the original `S1DSPKernel`, `S1NoteState`,
 `S1Sequencer`, `S1Arpeggiator`, `S1Rate` and `S1DSPCompressor` sources are
 compiled in place from `../AudioKitSynthOne/DSP`, against a compatibility layer
-that stands in for AudioKit and CoreAudio.
+that stands in for AudioKit and CoreAudio. The same sources build for both
+platforms, and produce bit-identical audio on each — the Windows binaries are
+verified against the Linux ones by rendering the same preset and comparing the
+WAVs byte for byte.
+
+> The directory is still called `linux/` for the Linux port it started as.
+> Windows shares all of it but the two files named below.
 
 **The iOS UI is not ported.** UIKit, the storyboards, the PaintCode StyleKits,
-and the Audiobus/OneSignal/AppCenter/Disk pods have no Linux equivalent — that
-is a rewrite, not a port. What you get here is the engine and a headless host.
+and the Audiobus/OneSignal/AppCenter/Disk pods have no equivalent on either
+platform — that is a rewrite, not a port. `synthone-gui` covers all six panels
+and every parameter, but it is drawn with Dear ImGui and does not look like the
+iOS app.
 
 ## Requirements
+
+For a Windows build, skip to [Windows](#windows-x86_64) — it needs only the
+mingw-w64 cross toolchain, not the libraries below.
 
 Arch Linux packages:
 
@@ -150,6 +166,85 @@ docker run --privileged --rm tonistiigi/binfmt --install arm64   # once
 
 Emulated compilation is slow. `package.sh --build-dir DIR --arch NAME` packages
 binaries built elsewhere, e.g. on real hardware.
+
+### Windows (x86_64)
+
+Windows binaries are **cross-compiled from Linux** with MinGW-w64. There is no
+MSVC project and nothing in the build has to run on Windows.
+
+```sh
+sudo apt install mingw-w64        # Debian/Ubuntu
+sudo pacman -S mingw-w64-gcc      # Arch
+
+./build-windows.sh                # -> build-windows/
+./build-windows.sh --package      # -> dist/synthone-windows-x86_64.zip
+```
+
+If the toolchain is not on `PATH` — an unpacked one, or an install without root
+— point at it with `--mingw DIR` (or `$MINGW_PREFIX`). Underneath, that is just:
+
+```sh
+cmake -S . -B build-windows -G Ninja \
+      -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-x86_64-w64-mingw32.cmake
+```
+
+GCC compiles these sources as readily as Clang; it only spells the warning
+switches differently, which `CMakeLists.txt` handles. Soundpipe, PortAudio,
+GLFW and Dear ImGui are all cross-built into the binary dir, and libstdc++ and
+libwinpthread are linked statically, so the binaries **import nothing but
+Windows' own DLLs** — there is no redistributable to ship alongside them.
+
+The archive is a folder you unzip and run. Resources sit next to the
+executables rather than behind wrapper scripts, because
+`Engine::defaultResourceDir()` looks beside the `.exe` first:
+
+```
+synthone-windows-x86_64/
+  synthone-gui.exe  synthone.exe  synthone-offline.exe
+  resources/DSP/BandlimitedWavetables/   resources/Presets/Data/
+  data/tunings.json
+```
+
+**Audio.** PortAudio wraps four Windows driver families and
+`Pa_GetDefaultOutputDevice()` answers MME, the 1991 API: emulated on top of the
+modern audio engine, the least dependable timing of the four, and the latency
+it reports describes PortAudio's own buffer chain rather than what the driver
+stack adds. The port prefers **WASAPI**, then DirectSound, then whatever the
+default is. Override per machine with `--host-api wasapi|directsound|mme|wdmks`.
+
+Treat that as a choice of API, not a measured latency win. On the machine this
+was written on WASAPI *reports* 22 ms against MME's 5.8 ms and DirectSound's
+6.8 ms, and no round-trip measurement was made to settle which is genuinely
+lower — which is exactly why `--host-api` exists. WASAPI **exclusive** mode,
+the thing that would actually cut latency, is not wired up. ASIO is absent
+too: it needs Steinberg's licensed SDK, which cannot be redistributed.
+
+**MIDI.** Input goes through WinMM, which has no notion of publishing a port
+other applications can connect to — an application only opens devices that
+already exist. So `--midi` takes a device *index* rather than ALSA's
+`CLIENT:PORT` (`--list-midi` numbers them; `all`, the default, opens every one).
+`N:0` is accepted too, so a command line copied from the Linux build still
+works.
+
+**What differs in the source.** Two files, plus one branch:
+
+| | |
+| --- | --- |
+| `host/WinMidi.cpp` | WinMM MIDI input, replacing `host/AlsaMidi.cpp`. Both implement `MidiInput` from `host/MidiInput.h`; WinMM calls back on its own thread, so it has no reader thread of its own and pushes straight onto the queue the audio thread drains. |
+| `src/PlatformPaths.cpp` | `executableDir()`, the one thing that needs the Win32 API. It is a separate translation unit **on purpose**: `<windows.h>` defines `typedef int BOOL` and the compat layer defines Apple's `typedef signed char BOOL`, which is a hard conflict in any file that includes both — and `<windows.h>` also defines `min`/`max` as macros, which would break `std::min` in the DSP sources. Keeping the Win32 surface in one file lets `Engine.cpp` stay plain C++. |
+
+Everything else is shared. `Engine::defaultUserDataDir()` gains a Windows
+branch (`%APPDATA%\SynthOne\presets`) and the CLI help changes wording for
+`--midi`; the DSP is untouched.
+
+**Not carried over:** `install.sh`, `uninstall.sh`, `package.sh` and the kiosk
+are Linux-only — `build-windows.sh` does the Windows build and packaging
+instead. JACK is not built for Windows; it exists there but is a niche install,
+and PortAudio already reaches the same drivers.
+
+`synthone-gui.exe` keeps a console attached, so backend and GLFW failures are
+visible rather than turning into a window that silently does nothing. Configure
+with `-DS1_WIN32_GUI_CONSOLE=OFF` for a console-free build.
 
 ### Raspberry Pi kiosk (boot straight into the synth)
 
@@ -392,10 +487,13 @@ Factory banks ship read-only in `AudioKitSynthOne/Presets/Data/` and are never
 written to. Presets you save go to
 
 ```
-$XDG_DATA_HOME/synthone/presets      (default: ~/.local/share/synthone/presets)
+Linux    $XDG_DATA_HOME/synthone/presets   (default: ~/.local/share/synthone/presets)
+Windows  %APPDATA%\SynthOne\presets
 ```
 
-overridable with `--user-dir DIR` on any of the three binaries. A user bank
+overridable with `--user-dir DIR` on any of the three binaries. (Roaming
+`%APPDATA%`, not `%LOCALAPPDATA%`: a preset bank is a small user-authored
+document, the kind of thing that should follow the user between machines.) A user bank
 shadows a factory bank of the same name, and saving into a factory bank name
 copies that whole bank into your directory first, leaving the shipped file
 untouched -- so the source tree stays clean.
@@ -509,6 +607,10 @@ DSP→UI notifications go through the message ring, drained by the host.
   editing is via the knobs beneath it rather than by dragging handles.
 - **Sample rate** is fixed at engine start; changing the JACK rate while
   running is not handled.
+- **On Windows, WASAPI exclusive mode and ASIO are not available** — the two
+  routes to genuinely low latency. Shared-mode WASAPI is what you get; ASIO
+  needs a licensed SDK that cannot be shipped. Actual round-trip latency has
+  not been measured on any Windows machine.
 - Presets that differ from the DSP default in mono/poly clear all voices on the
   first render after loading — upstream behaviour, invisible on iOS because the
   engine runs continuously. Load presets before playing, not between notes.
@@ -517,11 +619,14 @@ DSP→UI notifications go through the message ring, drained by the host.
 
 ```
 linux/
-  CMakeLists.txt        build; fetches and builds Soundpipe
+  CMakeLists.txt        build; fetches and builds Soundpipe (+ PortAudio and
+                        GLFW when cross-compiling for Windows)
+  cmake/                the MinGW-w64 cross toolchain file
+  build-windows.sh      Windows cross build and packaging
   compat/               Apple/AudioKit/TAAE stand-ins
   src/                  Soundpipe additions, Obj-C file replacements,
-                        JSON reader, engine facade
-  host/                 JACK + PortAudio backends, ALSA MIDI, CLI
+                        JSON reader, engine facade, Win32 path lookup
+  host/                 JACK + PortAudio backends, ALSA and WinMM MIDI, CLI
   gui/                  Dear ImGui front end
   kiosk/                systemd unit, launcher and config for the Pi kiosk
   tools/                synthone-offline, tunings extractor, screenshot capture

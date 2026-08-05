@@ -2,7 +2,8 @@
 //  main.cpp
 //  AudioKitSynthOne - Linux port
 //
-//  Standalone Synth One host: JACK or PortAudio out, ALSA sequencer MIDI in.
+//  Standalone Synth One host. Audio out over JACK or PortAudio; MIDI in over
+//  the ALSA sequencer on Linux and WinMM on Windows.
 //
 
 #include <atomic>
@@ -16,7 +17,7 @@
 #include <thread>
 #include <vector>
 
-#include "AlsaMidi.h"
+#include "MidiInput.h"
 #include "AudioBackend.h"
 #include "Engine.h"
 
@@ -33,6 +34,8 @@ void handleSignal(int) { gRunning.store(false); }
         "usage: synthone [options]\n"
         "\n"
         "  --backend NAME     audio backend: jack | portaudio (default: first available)\n"
+        "  --host-api NAME    PortAudio driver family (wasapi, directsound, mme, alsa...);\n"
+        "                     default prefers WASAPI on Windows, the system default elsewhere\n"
         "  --rate HZ          preferred sample rate (PortAudio only; JACK dictates its own)\n"
         "  --buffer FRAMES    preferred buffer size (PortAudio only)\n"
         "  --latency MS       output latency to aim for (PortAudio only;\n"
@@ -40,12 +43,16 @@ void handleSignal(int) { gRunning.store(false); }
         "  --resources DIR    AudioKitSynthOne source dir (default: built-in)\n"
         "  --bank NAME        preset bank to load\n"
         "  --preset N         preset position within the bank (default: 0)\n"
+#ifdef _WIN32
+        "  --midi PORT        MIDI device index, or 'all' (default: all)\n"
+#else
         "  --midi PORT        ALSA source as CLIENT:PORT, or 'all' (default: all)\n"
+#endif
         "  --set KEY=VALUE    override a synth parameter (repeatable)\n"
         "  --test-note N      play MIDI note N on a loop, to check audio without a controller\n"
         "  --list             list preset banks and presets, then exit\n"
         "  --list-params      list settable parameter names, then exit\n"
-        "  --list-midi        list ALSA MIDI sources, then exit\n"
+        "  --list-midi        list MIDI sources, then exit\n"
         "  --quiet            do not print the running status line\n"
         "\n"
         "Notes are played over MIDI. Ctrl-C to quit.\n";
@@ -78,7 +85,8 @@ public:
 
 int main(int argc, char **argv) {
     std::string backendName;
-    std::string resourceDir = S1_DEFAULT_RESOURCE_DIR;
+    std::string hostApi;
+    std::string resourceDir = s1::Engine::defaultResourceDir();
     std::string userDir;
     std::string bank;
     std::string midiSpec = "all";
@@ -97,6 +105,7 @@ int main(int argc, char **argv) {
             return argv[++i];
         };
         if (arg == "--backend") backendName = next();
+        else if (arg == "--host-api") hostApi = next();
         else if (arg == "--rate") requestedRate = std::stod(next());
         else if (arg == "--buffer") requestedFrames = static_cast<uint32_t>(std::stoul(next()));
         else if (arg == "--latency") requestedLatencySec = std::stod(next()) / 1000.0;
@@ -120,8 +129,8 @@ int main(int argc, char **argv) {
     }
 
     if (listMidi) {
-        for (const auto &source : s1::AlsaMidiInput::listSources()) {
-            std::cout << source.client << ":" << source.port << "  " << source.name << "\n";
+        for (const auto &source : s1::MidiInput::listSources()) {
+            std::cout << source.id << "  " << source.name << "\n";
         }
         return 0;
     }
@@ -146,7 +155,7 @@ int main(int argc, char **argv) {
         }
         if (backendName.empty()) backendName = backends.front();
 
-        backend = s1::makeBackend(backendName, error);
+        backend = s1::makeBackend(backendName, hostApi, error);
         if (!backend) {
             std::cerr << "error: " << error << "\n";
             return 1;
@@ -210,7 +219,7 @@ int main(int argc, char **argv) {
     // -- MIDI --------------------------------------------------------------
 
     s1::MidiQueue midiQueue;
-    s1::AlsaMidiInput midi;
+    s1::MidiInput midi;
     std::string midiStatus;
     if (!midi.open("SynthOne", error)) {
         midiStatus = "unavailable (" + error + ")";

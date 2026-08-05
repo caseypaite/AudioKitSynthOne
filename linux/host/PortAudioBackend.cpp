@@ -9,15 +9,113 @@
 #include "AudioBackend.h"
 
 #include <portaudio.h>
-#include <cstdio>
 
+#include <algorithm>
+#include <cstdio>
 #include <cstring>
 #include <vector>
 
 namespace s1 {
+namespace {
+
+/// The driver families PortAudio can wrap, by the name --host-api accepts.
+/// Listed for every platform: which ones are actually compiled in varies, and
+/// Pa_HostApiTypeIdToHostApiIndex answers that at runtime.
+struct HostApiName {
+    const char      *name;
+    PaHostApiTypeId  type;
+};
+
+constexpr HostApiName kHostApis[] = {
+    {"wasapi",      paWASAPI},
+    {"directsound", paDirectSound},
+    {"mme",         paMME},
+    {"wdmks",       paWDMKS},
+    {"asio",        paASIO},
+    {"alsa",        paALSA},
+    {"jack",        paJACK},
+    {"oss",         paOSS},
+    {"coreaudio",   paCoreAudio},
+};
+
+std::string knownHostApis() {
+    std::string out;
+    for (const auto &entry : kHostApis) {
+        if (Pa_HostApiTypeIdToHostApiIndex(entry.type) >= 0) {
+            if (!out.empty()) out += " ";
+            out += entry.name;
+        }
+    }
+    return out.empty() ? "none" : out;
+}
+
+/// The default output device of the named host API, or paNoDevice.
+PaDeviceIndex deviceForHostApi(PaHostApiTypeId type) {
+    const PaHostApiIndex api = Pa_HostApiTypeIdToHostApiIndex(type);
+    if (api < 0) return paNoDevice;
+    const PaHostApiInfo *info = Pa_GetHostApiInfo(api);
+    return info != nullptr ? info->defaultOutputDevice : paNoDevice;
+}
+
+/// Output devices to try, best first.
+///
+/// With no explicit choice, Pa_GetDefaultOutputDevice() answers MME on Windows.
+/// MME is the 1991 API: it is emulated on top of the modern audio engine, its
+/// timing is the least dependable of the four, and the latency it reports is
+/// the buffer chain PortAudio set up rather than what the driver stack
+/// actually adds. WASAPI is the current API and the one to build on, so it is
+/// preferred, with DirectSound behind it.
+///
+/// Note this is a choice of API, not a measured latency win: on the machine
+/// this was written on WASAPI *reports* 22 ms against MME's 5.8 ms, and no
+/// round-trip measurement was made to settle which is truly lower. --host-api
+/// exists precisely so that judgement can be overridden per machine.
+///
+/// The default is still appended, so a machine where neither opens keeps
+/// working.
+///
+/// On Linux the default (ALSA, or PipeWire's ALSA emulation) is already the
+/// right answer and the list is just that one entry.
+std::vector<PaDeviceIndex> candidateOutputDevices(const std::string &hostApi,
+                                                  std::string &error) {
+    std::vector<PaDeviceIndex> devices;
+
+    if (!hostApi.empty()) {
+        for (const auto &entry : kHostApis) {
+            if (hostApi != entry.name) continue;
+            const PaDeviceIndex device = deviceForHostApi(entry.type);
+            if (device == paNoDevice) {
+                error = "host API '" + hostApi +
+                        "' has no output device in this build; available:" " " + knownHostApis();
+                return {};
+            }
+            return {device};
+        }
+        error = "unknown host API '" + hostApi + "'; this build has: " + knownHostApis();
+        return {};
+    }
+
+#ifdef _WIN32
+    for (PaHostApiTypeId type : {paWASAPI, paDirectSound}) {
+        const PaDeviceIndex device = deviceForHostApi(type);
+        if (device != paNoDevice) devices.push_back(device);
+    }
+#endif
+
+    const PaDeviceIndex fallback = Pa_GetDefaultOutputDevice();
+    if (fallback != paNoDevice &&
+        std::find(devices.begin(), devices.end(), fallback) == devices.end()) {
+        devices.push_back(fallback);
+    }
+    return devices;
+}
+
+} // namespace
 
 class PortAudioBackend : public AudioBackend {
 public:
+    explicit PortAudioBackend(std::string hostApi) : mHostApi(std::move(hostApi)) {}
+
     ~PortAudioBackend() override {
         stop();
         if (mStream != nullptr) {
@@ -39,20 +137,27 @@ public:
         }
         mInitialised = true;
 
-        const PaDeviceIndex device = Pa_GetDefaultOutputDevice();
-        if (device == paNoDevice) {
-            error = "PortAudio found no default output device";
+        const std::vector<PaDeviceIndex> candidates = candidateOutputDevices(mHostApi, error);
+        if (candidates.empty()) {
+            if (error.empty()) error = "PortAudio found no default output device";
             return false;
         }
 
-        const PaDeviceInfo *info = Pa_GetDeviceInfo(device);
-        mSampleRate = requestedRate > 0 ? requestedRate : info->defaultSampleRate;
-        mBufferFrames = requestedFrames > 0 ? requestedFrames : 256;
+        // Try each in turn: a device the host API advertises can still refuse
+        // the stream (WASAPI shared mode is particular about sample rates), and
+        // falling through to the next one beats failing outright.
+        PaError rc = paNoDevice;
+        for (const PaDeviceIndex device : candidates) {
+            const PaDeviceInfo *info = Pa_GetDeviceInfo(device);
+            if (info == nullptr) continue;
 
-        PaStreamParameters params{};
-        params.device = device;
-        params.channelCount = 2;
-        params.sampleFormat = paFloat32 | paNonInterleaved;
+            mSampleRate = requestedRate > 0 ? requestedRate : info->defaultSampleRate;
+            mBufferFrames = requestedFrames > 0 ? requestedFrames : 256;
+
+            PaStreamParameters params{};
+            params.device = device;
+            params.channelCount = 2;
+            params.sampleFormat = paFloat32 | paNonInterleaved;
         // PortAudio takes this as the request and the buffer size as a hint,
         // so passing the device default made --buffer irrelevant to latency:
         // 64 and 128 frames both came back at 8.71ms on the machine this was
@@ -68,27 +173,31 @@ public:
         // Asking for two periods instead is not a safer middle ground -- it
         // rounds to the same value as 1.5 and is worse than the old default
         // above 256 frames. Use --latency if you want slack for a busy box.
-        const double periodSec = static_cast<double>(mBufferFrames) / mSampleRate;
-        params.suggestedLatency =
-            requestedLatencySec > 0.0 ? requestedLatencySec : periodSec;
-        params.hostApiSpecificStreamInfo = nullptr;
+            const double periodSec = static_cast<double>(mBufferFrames) / mSampleRate;
+            params.suggestedLatency =
+                requestedLatencySec > 0.0 ? requestedLatencySec : periodSec;
+            params.hostApiSpecificStreamInfo = nullptr;
 
-        const PaError rc = Pa_OpenStream(&mStream, nullptr, &params, mSampleRate, mBufferFrames,
-                                         paClipOff, &PortAudioBackend::callbackTrampoline, this);
-        if (rc != paNoError) {
-            error = std::string("Pa_OpenStream: ") + Pa_GetErrorText(rc);
-            return false;
+            rc = Pa_OpenStream(&mStream, nullptr, &params, mSampleRate, mBufferFrames,
+                               paClipOff, &PortAudioBackend::callbackTrampoline, this);
+            if (rc != paNoError) {
+                mStream = nullptr;
+                continue;
+            }
+
+            if (const PaStreamInfo *streamInfo = Pa_GetStreamInfo(mStream)) {
+                mSampleRate = streamInfo->sampleRate;
+                mOutputLatencySec = streamInfo->outputLatency;
+            }
+            mDeviceName = info->name ? info->name : "default";
+            if (const PaHostApiInfo *api = Pa_GetHostApiInfo(info->hostApi)) {
+                mDeviceName = std::string(api->name) + " / " + mDeviceName;
+            }
+            return true;
         }
 
-        if (const PaStreamInfo *streamInfo = Pa_GetStreamInfo(mStream)) {
-            mSampleRate = streamInfo->sampleRate;
-            mOutputLatencySec = streamInfo->outputLatency;
-        }
-        mDeviceName = info->name ? info->name : "default";
-        if (const PaHostApiInfo *api = Pa_GetHostApiInfo(info->hostApi)) {
-            mDeviceName = std::string(api->name) + " / " + mDeviceName;
-        }
-        return true;
+        error = std::string("Pa_OpenStream: ") + Pa_GetErrorText(rc);
+        return false;
     }
 
     bool start(RenderCallback render, std::string &error) override {
@@ -147,11 +256,12 @@ private:
     bool           mInitialised = false;
     bool           mActive = false;
     std::string    mDeviceName;
+    std::string    mHostApi;
     double         mOutputLatencySec = 0.0;
 };
 
-std::unique_ptr<AudioBackend> makePortAudioBackend() {
-    return std::make_unique<PortAudioBackend>();
+std::unique_ptr<AudioBackend> makePortAudioBackend(const std::string &hostApi) {
+    return std::make_unique<PortAudioBackend>(hostApi);
 }
 
 } // namespace s1

@@ -11,7 +11,7 @@ namespace s1 {
 std::unique_ptr<AudioBackend> makeJackBackend();
 #endif
 #ifdef S1_HAVE_PORTAUDIO
-std::unique_ptr<AudioBackend> makePortAudioBackend();
+std::unique_ptr<AudioBackend> makePortAudioBackend(const std::string &hostApi);
 #endif
 
 std::vector<std::string> availableBackends() {
@@ -25,12 +25,13 @@ std::vector<std::string> availableBackends() {
     return names;
 }
 
-std::unique_ptr<AudioBackend> makeBackend(const std::string &name, std::string &error) {
+std::unique_ptr<AudioBackend> makeBackend(const std::string &name, const std::string &hostApi,
+                                          std::string &error) {
 #ifdef S1_HAVE_JACK
     if (name == "jack") return makeJackBackend();
 #endif
 #ifdef S1_HAVE_PORTAUDIO
-    if (name == "portaudio") return makePortAudioBackend();
+    if (name == "portaudio") return makePortAudioBackend(hostApi);
 #endif
 
     error = "unknown or unavailable backend '" + name + "'; this build has:";

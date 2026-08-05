@@ -15,6 +15,7 @@
 #include <cmath>
 
 #include "AEMessageQueue.h"
+#include "PlatformPaths.h"
 #include "S1DSPKernel.hpp"
 
 namespace fs = std::filesystem;
@@ -583,7 +584,44 @@ bool Engine::applyTuning(int index) {
 // Presets
 // ---------------------------------------------------------------------------
 
+std::string Engine::defaultResourceDir() {
+    // A Windows build is distributed as a folder, not installed behind wrapper
+    // scripts the way install.sh does it on Linux, so resources sit next to the
+    // executable. The compiled-in path is a build-machine path, useful only when
+    // running straight out of the build tree.
+    const std::string exeDir = executableDir();
+    if (!exeDir.empty()) {
+        std::error_code ec;
+        const fs::path bundled = fs::path(exeDir) / "resources";
+        if (fs::exists(bundled / "Presets", ec)) return bundled.string();
+    }
+    return S1_DEFAULT_RESOURCE_DIR;
+}
+
+std::string Engine::defaultTuningsPath() {
+    const std::string exeDir = executableDir();
+    if (!exeDir.empty()) {
+        std::error_code ec;
+        const fs::path bundled = fs::path(exeDir) / "data" / "tunings.json";
+        if (fs::exists(bundled, ec)) return bundled.string();
+    }
+    return S1_TUNINGS_JSON;
+}
+
 std::string Engine::defaultUserDataDir() {
+#ifdef _WIN32
+    // The roaming profile is where a small user-authored document like a preset
+    // bank belongs; LOCALAPPDATA is for things that need not follow the user
+    // between machines.
+    if (const char *appData = std::getenv("APPDATA")) {
+        if (*appData != '\0') return (fs::path(appData) / "SynthOne" / "presets").string();
+    }
+    if (const char *profile = std::getenv("USERPROFILE")) {
+        if (*profile != '\0') {
+            return (fs::path(profile) / "AppData" / "Roaming" / "SynthOne" / "presets").string();
+        }
+    }
+#else
     if (const char *xdg = std::getenv("XDG_DATA_HOME")) {
         if (*xdg != '\0') return (fs::path(xdg) / "synthone" / "presets").string();
     }
@@ -592,6 +630,7 @@ std::string Engine::defaultUserDataDir() {
             return (fs::path(home) / ".local" / "share" / "synthone" / "presets").string();
         }
     }
+#endif
     return "./synthone-presets";
 }
 

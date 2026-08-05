@@ -82,9 +82,9 @@ void writeWav(const std::string &path, const std::vector<float> &interleaved, in
 } // namespace
 
 int main(int argc, char **argv) {
-    std::string resourceDir = S1_DEFAULT_RESOURCE_DIR;
+    std::string resourceDir = s1::Engine::defaultResourceDir();
     std::string userDir;
-    std::string tuningsPath = S1_TUNINGS_JSON;
+    std::string tuningsPath = s1::Engine::defaultTuningsPath();
     std::string bank;
     std::string outPath;
     int presetPosition = 0;

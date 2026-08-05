@@ -129,8 +129,17 @@ public:
 
     // -- presets -----------------------------------------------------------
 
+    /// Default location of the shipped resources (the AudioKitSynthOne source
+    /// directory holding Presets/ and BandlimitedWavetables/) and of the
+    /// tunings library. On Linux these are the paths compiled in at configure
+    /// time; on Windows a `resources`/`data` folder beside the executable wins,
+    /// since a Windows build ships as a self-contained folder.
+    static std::string defaultResourceDir();
+    static std::string defaultTuningsPath();
+
     /// Where user-created presets are written. Defaults to
-    /// $XDG_DATA_HOME/synthone/presets (or ~/.local/share/synthone/presets).
+    /// $XDG_DATA_HOME/synthone/presets (or ~/.local/share/synthone/presets) on
+    /// Linux, and %APPDATA%\SynthOne\presets on Windows.
     /// The factory banks under <resourceDir>/Presets/Data are never written to.
     static std::string defaultUserDataDir();
     void setUserDataDir(const std::string &dir) { mUserDir = dir; }
