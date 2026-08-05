@@ -117,10 +117,15 @@ To hand it to someone else:
 ./package.sh          # -> dist/synthone-linux-<arch>.zip
 ```
 
-The archive carries the binaries, their data and both scripts; `install.sh`
+The archive carries the binaries, their data, both scripts and the `kiosk/`
+templates, so `sudo ./install.sh --kiosk` works straight out of it; `install.sh`
 detects the packaged layout, so the recipient does not need the source. It is
 not self-contained though -- alsa-lib, glfw, libGL, jack/pipewire-jack,
 portaudio and libX11 must be present on the target.
+
+`package.sh` fails rather than shipping an incomplete archive: it checks the
+staged tree against everything `install.sh` reads out of it before zipping. Add
+a file that `install.sh` needs and add it to that list too.
 
 ### ARM64 (aarch64)
 

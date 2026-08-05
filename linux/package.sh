@@ -93,6 +93,16 @@ install -m 755 "$HERE/uninstall.sh" "$ROOT/uninstall.sh"
 [ -f "$REPO/LICENSE" ] && install -m 644 "$REPO/LICENSE" "$ROOT/LICENSE" || true
 say "scripts"
 
+# The Raspberry Pi kiosk templates. install.sh --kiosk refuses to run without
+# them, so they are not optional: a missing one is a packaging bug, not a
+# degraded archive.
+install -d "$ROOT/kiosk"
+for f in synthone-kiosk synthone-kiosk.service kiosk.conf; do
+    [ -f "$HERE/kiosk/$f" ] || die "missing $HERE/kiosk/$f"
+    install -m 644 "$HERE/kiosk/$f" "$ROOT/kiosk/$f"
+done
+say "kiosk templates"
+
 # -- readme -----------------------------------------------------------------
 
 cat > "$ROOT/README.txt" <<'README'
@@ -163,9 +173,44 @@ Where things go
 
 Presets you save go to $XDG_DATA_HOME/synthone/presets, defaulting to
 ~/.local/share/synthone/presets. The factory banks are never modified.
+
+
+Raspberry Pi kiosk
+------------------
+
+    sudo ./install.sh --kiosk
+    sudo ./install.sh --kiosk --kiosk-user pi
+
+Adds a systemd service that boots straight into the synth: a bare X server on
+vt1 with synthone-gui as its only client, no desktop and no window manager. It
+needs root, because it takes tty1 away from getty. Requires xinit:
+
+    sudo apt install xserver-xorg xinit
+
+Installed but not started, so you keep the console you ran it from:
+
+    systemctl start synthone-kiosk
+    journalctl -u synthone-kiosk -f
+    systemctl disable --now synthone-kiosk
+
+Settings (audio backend, geometry, MIDI source) live in /etc/synthone/kiosk.conf
+and survive reinstalls. The templates they are generated from are in kiosk/.
 README
 sed -i "s/@ARCH@/$ARCH/" "$ROOT/README.txt"
 say "readme"
+
+# -- preflight --------------------------------------------------------------
+#
+# Everything install.sh reads out of the archive, checked here rather than on
+# the target machine. The kiosk templates were missing from the archive once.
+
+for p in bin/synthone-gui bin/synthone bin/synthone-offline \
+         "share/$APP_ID/DSP/BandlimitedWavetables" "share/$APP_ID/Presets/Data" \
+         install.sh uninstall.sh \
+         kiosk/synthone-kiosk kiosk/synthone-kiosk.service kiosk/kiosk.conf; do
+    [ -e "$ROOT/$p" ] || die "staged tree is missing $p"
+done
+say "preflight"
 
 # -- zip --------------------------------------------------------------------
 
