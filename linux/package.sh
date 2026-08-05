@@ -181,17 +181,23 @@ Raspberry Pi kiosk
     sudo ./install.sh --kiosk
     sudo ./install.sh --kiosk --kiosk-user pi
 
-Adds a systemd service that boots straight into the synth: a bare X server on
-vt1 with synthone-gui as its only client, no desktop and no window manager. It
-needs root, because it takes tty1 away from getty. Requires xinit:
+Boots straight into the synth: a bare X server on vt1 with synthone-gui as its
+only client, no desktop and no window manager. There is no login prompt -- the
+service runs as the configured user and systemd opens the session for them.
+Requires xinit:
 
     sudo apt install xserver-xorg xinit
 
-Installed but not started, so you keep the console you ran it from:
+--kiosk takes the machine over. It disables the display manager, switches the
+default target to multi-user, takes tty1 from getty, and starts the kiosk
+immediately -- so run it over SSH, or it will replace the console you are
+typing into.
 
-    systemctl start synthone-kiosk
     journalctl -u synthone-kiosk -f
     systemctl disable --now synthone-kiosk
+
+./uninstall.sh puts the display manager, the default target and getty back as
+they were, from the record in /etc/synthone/kiosk.state.
 
 Settings (audio backend, geometry, MIDI source) live in /etc/synthone/kiosk.conf
 and survive reinstalls. The templates they are generated from are in kiosk/.

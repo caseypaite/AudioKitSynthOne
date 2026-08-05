@@ -160,22 +160,38 @@ rather than to a desktop session.
 
 ```sh
 sudo ./install.sh --prefix /usr/local --kiosk --kiosk-user pi
-sudo systemctl start synthone-kiosk        # or just reboot
 journalctl -u synthone-kiosk -f            # watch it come up
 ```
 
 It needs `xserver-xorg` and `xinit` (`apt install xserver-xorg xinit`) -- an X
-server, but no desktop on top of it. Installing the kiosk also:
+server, but no desktop on top of it.
 
-- takes tty1 from `getty` (`Conflicts=getty@tty1.service`), which `--uninstall`
-  gives back;
+There is no login prompt and no autologin getty to configure: the unit runs as
+the configured user under `PAMName=login`, so `logind` opens a real session for
+them -- `XDG_RUNTIME_DIR`, user services and all -- with no password and no
+shell in between. The service is enabled, so that happens on every boot.
+
+**`--kiosk` takes the machine over.** As well as installing the unit, it:
+
+- **starts the kiosk there and then**, which takes tty1 immediately. Run it
+  over SSH: on the Pi's own console it replaces the shell you typed it into.
+  If `xinit` is missing it is enabled but not started, and says so, rather than
+  entering a two-second restart loop;
+- **disables the display manager** (`lightdm` and friends) and **switches the
+  default target to `multi-user.target`**, so nothing else claims the GPU or
+  the seat at boot. The unit also carries `Conflicts=display-manager.service`,
+  so starting the kiosk stops a display manager that gets re-enabled later;
+- takes tty1 from `getty` (`Conflicts=getty@tty1.service`);
 - adds the kiosk user to `audio`, `video`, `input` and `tty`;
 - writes `/etc/X11/Xwrapper.config` with `allowed_users=anybody` if that file
   does not already exist, since a service is not a console login. If it does
   exist, the script tells you what to add rather than editing it.
 
-The service is enabled but **not started**, so you keep the console you ran it
-from.
+The display manager and default target as they were before the first `--kiosk`
+run are recorded in `/etc/synthone/kiosk.state`; `./uninstall.sh` reads it back,
+re-enables the display manager, restores the target, returns tty1 to `getty`
+and removes the file. Re-running `--kiosk` never rewrites that record, so the
+original values survive a reinstall.
 
 Settings live in `/etc/synthone/kiosk.conf`, never in the unit, and survive
 reinstalls:

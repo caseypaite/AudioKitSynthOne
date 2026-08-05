@@ -18,6 +18,13 @@ Wants=sound.target
 After=getty@tty1.service
 Conflicts=getty@tty1.service
 
+# A display manager cannot share the GPU and the seat with a bare X server on
+# vt1. install.sh disables it, but this makes sure that starting the kiosk
+# stops one that is running anyway -- e.g. after a desktop package re-enables
+# it, or if the kiosk is started by hand from a running desktop.
+Conflicts=display-manager.service
+After=display-manager.service
+
 [Service]
 Type=simple
 User=@KIOSK_USER@

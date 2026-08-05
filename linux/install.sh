@@ -26,6 +26,15 @@
 # root, because it takes tty1 away from getty. Settings live in
 # /etc/synthone/kiosk.conf, not in the unit.
 #
+# The kiosk owns the machine: --kiosk disables the display manager, switches
+# the default systemd target to multi-user, and starts the service there and
+# then, so the synth comes up on boot with no login prompt and no desktop. The
+# previous display manager and target are recorded in /etc/synthone/kiosk.state
+# and put back by --uninstall.
+#
+# Run it over SSH if you can. Starting the kiosk takes tty1 immediately, so on
+# the Pi's own console it will replace the shell you typed this into.
+#
 
 set -euo pipefail
 
@@ -94,6 +103,9 @@ KIOSK_CONF="$KIOSK_CONF_DIR/kiosk.conf"
 KIOSK_UNIT_DIR="/etc/systemd/system"
 KIOSK_UNIT="$KIOSK_UNIT_DIR/synthone-kiosk.service"
 KIOSK_LAUNCHER="$BIN_DIR/synthone-kiosk"
+# What the machine looked like before the kiosk took it over, so --uninstall
+# can hand the desktop back. Written once, on the first --kiosk install.
+KIOSK_STATE="$KIOSK_CONF_DIR/kiosk.state"
 
 say()  { printf '  %s\n' "$*"; }
 die()  { printf 'error: %s\n' "$*" >&2; exit 1; }
@@ -145,6 +157,23 @@ if [ "$ACTION" = uninstall ]; then
             # Hand tty1 back to getty.
             systemctl enable --now getty@tty1.service >/dev/null 2>&1 || true
             say "tty1 returned to getty"
+
+            # Put the desktop back the way --kiosk found it.
+            if [ -f "$KIOSK_STATE" ]; then
+                # shellcheck source=/dev/null
+                . "$KIOSK_STATE"
+                if [ -n "${DISABLED_DISPLAY_MANAGER:-}" ]; then
+                    systemctl enable "$DISABLED_DISPLAY_MANAGER" >/dev/null 2>&1 \
+                        && say "re-enabled $DISABLED_DISPLAY_MANAGER" \
+                        || say "warning: could not re-enable $DISABLED_DISPLAY_MANAGER"
+                fi
+                if [ -n "${PREVIOUS_DEFAULT_TARGET:-}" ]; then
+                    systemctl set-default "$PREVIOUS_DEFAULT_TARGET" >/dev/null 2>&1 \
+                        && say "default target -> $PREVIOUS_DEFAULT_TARGET" \
+                        || say "warning: could not restore the default target"
+                fi
+                rm -f "$KIOSK_STATE"
+            fi
             say "kept $KIOSK_CONF"
         fi
     fi
@@ -342,16 +371,79 @@ if [ "$KIOSK" -eq 1 ]; then
     chmod 644 "$KIOSK_UNIT"
     say "unit -> $KIOSK_UNIT"
 
+    # -- take the machine over -----------------------------------------------
+    #
+    # Raspberry Pi OS Desktop boots lightdm under graphical.target. A bare X
+    # server on vt1 cannot share the GPU and the seat with a display manager,
+    # so the kiosk needs it gone rather than merely losing the race to it.
+
+    dm_unit=""
+    if [ -e /etc/systemd/system/display-manager.service ]; then
+        dm_unit="$(basename "$(readlink -f /etc/systemd/system/display-manager.service)")"
+    else
+        for u in lightdm gdm3 gdm sddm lxdm xdm; do
+            if systemctl is-enabled "$u.service" >/dev/null 2>&1; then
+                dm_unit="$u.service"
+                break
+            fi
+        done
+    fi
+    prev_target="$(systemctl get-default 2>/dev/null || echo graphical.target)"
+
+    # Recorded once. A second --kiosk run must not overwrite the original
+    # values with the ones this script itself put in place.
+    if [ ! -f "$KIOSK_STATE" ]; then
+        cat > "$KIOSK_STATE" <<STATE
+# Written by AudioKit Synth One install.sh --kiosk.
+# What this machine looked like before the kiosk; --uninstall restores it.
+PREVIOUS_DEFAULT_TARGET="$prev_target"
+DISABLED_DISPLAY_MANAGER="$dm_unit"
+STATE
+        chmod 644 "$KIOSK_STATE"
+        say "recorded the previous setup in $KIOSK_STATE"
+    fi
+
+    if [ -n "$dm_unit" ]; then
+        systemctl disable "$dm_unit" >/dev/null 2>&1 || true
+        say "disabled $dm_unit (no desktop at boot)"
+    fi
+    if [ "$prev_target" != "multi-user.target" ]; then
+        systemctl set-default multi-user.target >/dev/null 2>&1 || true
+        say "default target: $prev_target -> multi-user.target"
+    fi
+
     systemctl daemon-reload
     systemctl enable synthone-kiosk.service >/dev/null 2>&1
     say "enabled at boot (tty1 will be taken from getty)"
 
+    # -- start ---------------------------------------------------------------
+    #
+    # Without xinit the unit would fail and, with Restart=always, sit in a
+    # two-second crash loop -- worse than not starting and saying why.
+    started=0
+    if command -v xinit >/dev/null 2>&1; then
+        # restart, not start: a re-run should pick up the new unit and launcher.
+        if systemctl restart synthone-kiosk.service; then
+            started=1
+            say "started (the synth now owns tty1)"
+        else
+            say "warning: the service failed to start; see journalctl -u synthone-kiosk"
+        fi
+    else
+        say "not started: xinit is missing. Install it, then: systemctl start synthone-kiosk"
+    fi
+
     echo
-    echo "  Kiosk installed but not started, so you do not lose this console."
-    echo "  Start it now with:   systemctl start synthone-kiosk"
+    if [ "$started" -eq 1 ]; then
+        echo "  The kiosk is running and will come back on every boot, with no"
+        echo "  login prompt: systemd opens the session for $KIOSK_USER itself."
+    else
+        echo "  The kiosk is enabled and will start on the next boot."
+    fi
     echo "  Watch it with:       journalctl -u synthone-kiosk -f"
     echo "  Settings:            $KIOSK_CONF"
     echo "  Turn it off with:    systemctl disable --now synthone-kiosk"
+    echo "  Give the desktop back with: ./uninstall.sh"
 fi
 
 # -- report -----------------------------------------------------------------
