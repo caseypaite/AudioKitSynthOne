@@ -49,11 +49,15 @@ cmake -S . -B build -G Ninja
 cmake --build build
 ```
 
+That is the native Linux build; for Windows binaries run
+[`./build-windows.sh`](#windows-x86_64) instead, which needs no libraries
+beyond the cross toolchain.
+
 Offline (no network / air-gapped): build Soundpipe yourself and point CMake at
 it with `-DSOUNDPIPE_ROOT=/path/to/soundpipe` (a tree containing
 `libsoundpipe.a` and `h/soundpipe.h`, built with `make NO_LIBSNDFILE=1`).
 
-Two binaries are produced:
+Three binaries are produced:
 
 | binary | purpose |
 | --- | --- |
@@ -107,6 +111,14 @@ engine itself adds nothing -- a note-on is audible in the first sample of the
 block it lands in. MIDI arrives on an ALSA
 sequencer port (`--midi CLIENT:PORT`, or `all`, the default).
 
+The same commands work on Windows, with two differences: there is no JACK, so
+`--backend portaudio` is the only choice and `--host-api` picks the driver
+family beneath it, and `--midi` takes a device index rather than `CLIENT:PORT`.
+Both are covered under [Windows](#windows-x86_64). The latency table above was
+measured on Linux and does not transfer -- MME, DirectSound and WASAPI each
+report their own figure, and none of them was verified by round-trip
+measurement.
+
 Rendering without hardware:
 
 ```sh
@@ -115,6 +127,9 @@ Rendering without hardware:
 ```
 
 ## Install
+
+Linux only -- a Windows build is a folder you unzip and run, with no install
+step at all. See [Windows](#windows-x86_64).
 
 ```sh
 ./install.sh                            # ~/.local, adds a menu entry
@@ -587,9 +602,10 @@ preset→parameter mapping is transcribed from `PresetDataManager.swift`,
 including the legacy VCO-era key names (`vco1Volume` → `morph1Volume`, …);
 parameters absent from older presets fall back to the DSP default.
 
-MIDI is queued on the ALSA thread and applied at the top of the render
-callback, so note handling and `process()` stay on one thread. Note on/off does
-not allocate — the held-note vector is reserved to 128 entries up front.
+MIDI is queued on the ALSA thread — or, on Windows, on the thread WinMM calls
+back from — and applied at the top of the render callback, so note handling and
+`process()` stay on one thread. Note on/off does not allocate — the held-note
+vector is reserved to 128 entries up front.
 
 Threading follows upstream: the render thread never blocks or allocates, and
 DSP→UI notifications go through the message ring, drained by the host.

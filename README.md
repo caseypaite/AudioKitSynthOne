@@ -24,7 +24,17 @@ bit-identical audio on both platforms.
 
 **The port was written with [Claude](https://claude.ai), using Anthropic's
 Claude Code.** That includes the compatibility layer, the JACK/PortAudio/ALSA
-host, the Dear ImGui front end, and the tooling.
+and PortAudio/WinMM hosts, the Dear ImGui front end, and the build and
+cross-compile tooling.
+
+### Downloads
+
+Built archives for all three targets are on the
+[releases page](https://github.com/caseypaite/AudioKitSynthOne/releases): Linux
+x86_64, Linux aarch64, and Windows x86_64. The Linux archives install with
+`./install.sh` and need alsa-lib, glfw, libGL, jack/pipewire-jack, portaudio and
+libX11 present; the Windows archive is self-contained — unzip it and run
+`synthone-gui.exe`.
 
 ### Why: a standalone Raspberry Pi synth
 
