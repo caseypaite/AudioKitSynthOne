@@ -11,9 +11,15 @@
 #include <portaudio.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cstdio>
 #include <cstring>
 #include <vector>
+
+#ifndef _WIN32
+#  include <pthread.h>
+#  include <sched.h>
+#endif
 
 namespace s1 {
 namespace {
@@ -290,6 +296,23 @@ private:
     }
 
     int callback(void *output, uint32_t frames) {
+        // Escalate to real-time scheduling on the first call, which is the
+        // first time we are certain we are on the audio callback thread.
+        // SCHED_FIFO 95 matches the limit in /etc/security/limits.d/synthone-audio.conf
+        // and the LimitRTPRIO= in the kiosk unit. Fails silently when the
+        // system has not been configured for it (non-kiosk installs).
+#ifndef _WIN32
+        if (!mRtSet.exchange(true, std::memory_order_relaxed)) {
+            struct sched_param sp{};
+            sp.sched_priority = 95;
+            const int rc = pthread_setschedparam(pthread_self(), SCHED_FIFO, &sp);
+            if (rc != 0) {
+                std::fprintf(stderr, "[audio] SCHED_FIFO: %s (run install.sh --kiosk or add audio limits)\n",
+                             strerror(rc));
+            }
+        }
+#endif
+
         auto **channels = static_cast<float **>(output);
         float *left = channels[0];
         float *right = channels[1];
@@ -313,6 +336,9 @@ private:
     std::string    mHostApi;
     int            mDeviceIndex = kAutoDevice;
     double         mOutputLatencySec = 0.0;
+#ifndef _WIN32
+    std::atomic<bool> mRtSet{false};
+#endif
 };
 
 std::unique_ptr<AudioBackend> makePortAudioBackend(const std::string &hostApi, int deviceIndex) {
