@@ -612,6 +612,19 @@ bool SequencerGrid(s1::Engine &engine, int totalSteps, int currentStep, const Im
                         ImGui::GetTextLineHeightWithSpacing();
     const float sliderH = size.y > 0.0f ? std::max(40.0f, size.y - fixed) : 64.0f;
 
+    // S1Sequencer::getArpBeatCount() hands out a free-running counter -- it is
+    // mBeatTime divided by the tempo multiplier, and nothing ever folds it back
+    // (a single held note walks it into the hundreds). Wrapping it is the UI's
+    // job, exactly as SequencerPanelController.updateLED does on iOS:
+    //
+    //     let notePosition = (beatCounter + seqTotalSteps) % seqTotalSteps
+    //
+    // Without this the lit step simply stopped once a held note outlasted one
+    // pass of the sequence, because no column index ever equalled the counter
+    // again. -1 is the "no beat reported yet" value and stays unlit.
+    const int wrapSteps = totalSteps > 0 ? totalSteps : kSteps;
+    const int litStep = currentStep >= 0 ? ((currentStep % wrapSteps) + wrapSteps) % wrapSteps : -1;
+
     ImGui::BeginGroup();
     ImGui::TextColored(ImColor(color::kTextDim), "STEP");
     for (int i = 0; i < kSteps; ++i) {
@@ -620,7 +633,7 @@ bool SequencerGrid(s1::Engine &engine, int totalSteps, int currentStep, const Im
         ImGui::PushID(i);
 
         const bool inRange = i < totalSteps;
-        const bool playing = (i == currentStep);
+        const bool playing = (i == litStep);
 
         // Step-position LED
         const ImVec2 ledPos = ImGui::GetCursorScreenPos();
