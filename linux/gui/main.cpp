@@ -10,7 +10,9 @@
 #include <atomic>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <string>
+#include <system_error>
 
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
@@ -21,6 +23,7 @@
 #include "MidiInput.h"
 #include "AudioBackend.h"
 #include "Engine.h"
+#include "Json.h"
 #include "Panels.h"
 #include "Widgets.h"
 
@@ -143,6 +146,85 @@ void panelTabs(const char *id, const char *label, s1gui::Panel &current, s1gui::
 
 } // namespace
 
+namespace {
+
+/// Where the chosen output is remembered between runs. Deliberately its own
+/// small file rather than anything preset-shaped: which speaker you use is a
+/// property of the machine, and must not travel with a preset or a bank.
+std::string audioConfigPath(const s1::Engine &engine) {
+    return engine.userDataDir() + "/audio.json";
+}
+
+/// Device names come from the driver and are not ours to trust as JSON.
+std::string jsonEscape(const std::string &text) {
+    std::string out;
+    out.reserve(text.size());
+    for (const char c : text) {
+        switch (c) {
+            case '"':  out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\n': out += "\\n";  break;
+            case '\r': out += "\\r";  break;
+            case '\t': out += "\\t";  break;
+            default:   out += c;      break;
+        }
+    }
+    return out;
+}
+
+void loadAudioConfig(const s1::Engine &engine, s1gui::UiState &ui) {
+    s1::JsonValue root;
+    std::string error;
+    if (!s1::JsonValue::parseFile(audioConfigPath(engine), root, error) || !root.isObject()) return;
+
+    if (root.contains("backend")) ui.audioBackend = root["backend"].asString(ui.audioBackend);
+    if (root.contains("deviceIndex")) ui.audioDeviceIndex = root["deviceIndex"].asInt(ui.audioDeviceIndex);
+    if (root.contains("sampleRate")) ui.audioSampleRate = root["sampleRate"].asInt(ui.audioSampleRate);
+    if (root.contains("bufferFrames")) ui.audioBufferFrames = root["bufferFrames"].asInt(ui.audioBufferFrames);
+
+    // A device id is only meaningful next to the name it had when it was saved:
+    // ids shift as devices come and go, and silently opening whatever now sits
+    // at that index is worse than falling back to automatic.
+    const std::string savedName = root["deviceName"].asString();
+    if (ui.audioDeviceIndex != s1::kAutoDevice && !savedName.empty()) {
+        bool matched = false;
+        for (const auto &device : s1::availableOutputDevices(ui.audioBackend)) {
+            if (device.index == ui.audioDeviceIndex && device.name == savedName) {
+                matched = true;
+                break;
+            }
+        }
+        if (!matched) ui.audioDeviceIndex = s1::kAutoDevice;
+    }
+}
+
+void saveAudioConfig(const s1::Engine &engine, const s1gui::UiState &ui) {
+    std::string deviceName;
+    for (const auto &device : ui.audioDevices) {
+        if (device.index == ui.audioDeviceIndex) {
+            deviceName = device.name;
+            break;
+        }
+    }
+
+    std::string json = "{\n";
+    json += "  \"backend\": \"" + ui.audioBackend + "\",\n";
+    json += "  \"deviceIndex\": " + std::to_string(ui.audioDeviceIndex) + ",\n";
+    json += "  \"deviceName\": \"" + jsonEscape(deviceName) + "\",\n";
+    json += "  \"sampleRate\": " + std::to_string(ui.audioSampleRate) + ",\n";
+    json += "  \"bufferFrames\": " + std::to_string(ui.audioBufferFrames) + "\n";
+    json += "}\n";
+
+    std::error_code ec;
+    std::filesystem::create_directories(engine.userDataDir(), ec);
+    if (FILE *f = std::fopen(audioConfigPath(engine).c_str(), "wb")) {
+        std::fwrite(json.data(), 1, json.size(), f);
+        std::fclose(f);
+    }
+}
+
+} // namespace
+
 int main(int argc, char **argv) {
     std::string backendName;
     std::string hostApi;
@@ -150,6 +232,11 @@ int main(int argc, char **argv) {
     std::string userDir;
     std::string midiSpec = "all";
     std::string tuningsPath = s1::Engine::defaultTuningsPath();
+    std::string deviceSpec;
+    bool backendGiven = false;
+    int  requestedRate = 0;
+    int  requestedFrames = 0;
+    bool listDevices = false;
     int windowWidth = 1440, windowHeight = 900;
     bool fullscreen = false;
     bool hideCursor = false;
@@ -170,8 +257,12 @@ int main(int argc, char **argv) {
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         auto next = [&]() -> std::string { return (i + 1 < argc) ? argv[++i] : std::string(); };
-        if (arg == "--backend") backendName = next();
+        if (arg == "--backend") { backendName = next(); backendGiven = true; }
         else if (arg == "--host-api") hostApi = next();
+        else if (arg == "--device") deviceSpec = next();
+        else if (arg == "--rate") requestedRate = std::atoi(next().c_str());
+        else if (arg == "--buffer") requestedFrames = std::atoi(next().c_str());
+        else if (arg == "--list-devices") listDevices = true;
         else if (arg == "--resources") resourceDir = next();
         else if (arg == "--user-dir") userDir = next();
         else if (arg == "--midi") midiSpec = next();
@@ -193,6 +284,8 @@ int main(int argc, char **argv) {
         else if (arg == "-h" || arg == "--help") {
             std::printf("usage: synthone-gui [--backend jack|portaudio] [--host-api NAME]\n"
                         "       [--resources DIR]\n"
+                        "                    [--device INDEX|NAME] [--list-devices]\n"
+                        "                    [--rate HZ] [--buffer FRAMES]\n"
                         "                    [--midi CLIENT:PORT|all] [--geometry WxH]\n"
                         "                    [--top PANEL] [--bottom PANEL]\n"
                         "                    [--fullscreen] [--hide-cursor]\n"
@@ -213,19 +306,48 @@ int main(int argc, char **argv) {
     }
     if (backendName.empty()) backendName = backends.front();
 
+    if (listDevices) {
+        for (const auto &device : s1::availableOutputDevices(backendName)) {
+            std::printf("  %3d  %-44s %-10s %6.0f Hz  %dch%s\n", device.index, device.name.c_str(),
+                        device.hostApi.c_str(), device.defaultSampleRate, device.maxChannels,
+                        device.isDefault ? "  [default]" : "");
+        }
+        return 0;
+    }
+
+    s1::Engine engine;
+    if (!userDir.empty()) engine.setUserDataDir(userDir);
+
+    // Audio preferences: the saved file is the baseline, anything given on the
+    // command line wins over it, and neither is written back until the dialog
+    // applies a change -- so a one-off --device does not become permanent.
+    s1gui::UiState ui;
+    ui.audioBackend = backendName;
+    loadAudioConfig(engine, ui);
+    if (backendGiven) ui.audioBackend = backendName;
+    if (requestedRate > 0) ui.audioSampleRate = requestedRate;
+    if (requestedFrames > 0) ui.audioBufferFrames = requestedFrames;
+    if (!deviceSpec.empty()) {
+        s1gui::RefreshAudioDevices(ui);
+        std::string resolveError;
+        if (!s1::resolveOutputDevice(deviceSpec, ui.audioDevices, ui.audioDeviceIndex,
+                                     resolveError)) {
+            std::fprintf(stderr, "error: %s\n", resolveError.c_str());
+            return 1;
+        }
+    }
+
     std::string error;
-    auto backend = s1::makeBackend(backendName, hostApi, error);
-    if (!backend || !backend->open(0, 0, 0.0, error)) {
+    auto backend = s1::makeBackend(ui.audioBackend, hostApi, ui.audioDeviceIndex, error);
+    if (!backend || !backend->open(ui.audioSampleRate, ui.audioBufferFrames, 0.0, error)) {
         std::fprintf(stderr, "error: %s\n", error.c_str());
         return 1;
     }
 
-    s1::Engine engine;
     if (!engine.start(backend->sampleRate(), 2, resourceDir, error)) {
         std::fprintf(stderr, "error: %s\n", error.c_str());
         return 1;
     }
-    if (!userDir.empty()) engine.setUserDataDir(userDir);
     if (!engine.loadBanks(error)) {
         std::fprintf(stderr, "warning: %s\n", error.c_str());
     }
@@ -233,7 +355,6 @@ int main(int argc, char **argv) {
         std::fprintf(stderr, "warning: tunings: %s\n", error.c_str());
     }
 
-    s1gui::UiState ui;
     if (!topPanelName.empty()) panelByName(topPanelName, ui.topPanel);
     if (!bottomPanelName.empty()) panelByName(bottomPanelName, ui.bottomPanel);
 
@@ -277,6 +398,70 @@ int main(int argc, char **argv) {
         std::fprintf(stderr, "error: %s\n", error.c_str());
         return 1;
     }
+
+    auto describeAudio = [&backend]() {
+        char buf[320];
+        std::snprintf(buf, sizeof(buf), "%s  %s   %.0f Hz / %u frames", backend->name(),
+                      backend->description().c_str(), backend->sampleRate(),
+                      backend->bufferFrames());
+        return std::string(buf);
+    };
+    ui.audioStatus = describeAudio();
+
+    // The DSP is built for one sample rate: the wavetable increments, envelope
+    // rates and LFO phases all derive from it, so changing rate means building
+    // the kernel again and putting the preset and tuning back.
+    auto rebuildEngine = [&](double rate) {
+        std::string rebuildError;
+        if (!engine.start(rate, 2, resourceDir, rebuildError)) return false;
+        const int tuning = engine.currentTuningIndex();
+        if (tuning >= 0) engine.applyTuning(tuning);
+        if (!ui.currentBank.empty()) {
+            std::string ignored;
+            engine.applyPreset(ui.currentBank, ui.currentPreset, ignored);
+        }
+        return true;
+    };
+
+    // Reopen the stream on the device the dialog chose. Every failure path ends
+    // with the synth audible on the device it had before, because a mistyped
+    // device is a much smaller problem than a synth that has gone silent.
+    auto applyAudio = [&]() {
+        const double previousRate = engine.sampleRate();
+        backend->stop();
+        engine.allNotesOff();
+
+        std::string applyError;
+        auto next = s1::makeBackend(ui.audioBackend, hostApi, ui.audioDeviceIndex, applyError);
+        if (next && next->open(ui.audioSampleRate, ui.audioBufferFrames, 0.0, applyError)) {
+            const bool rateChanged = next->sampleRate() != previousRate;
+            if (!rateChanged || rebuildEngine(next->sampleRate())) {
+                if (next->start(render, applyError)) {
+                    backend = std::move(next);
+                    ui.audioStatus = describeAudio();
+                    ui.notify("audio: " + ui.audioStatus);
+                    saveAudioConfig(engine, ui);
+                    return;
+                }
+                // The new stream refused to start after the kernel had already
+                // moved: put the kernel back before falling through.
+                if (rateChanged) rebuildEngine(previousRate);
+            } else {
+                applyError = "could not rebuild the DSP at " +
+                             std::to_string(static_cast<int>(next->sampleRate())) + " Hz";
+                rebuildEngine(previousRate);
+            }
+        }
+
+        std::string restartError;
+        if (backend->start(render, restartError)) {
+            ui.notify("audio: " + applyError + " -- kept the previous device");
+        } else {
+            ui.notify("audio: " + applyError + "; the previous device also failed: " +
+                      restartError);
+        }
+        ui.audioStatus = describeAudio();
+    };
 
     // -- window ------------------------------------------------------------
 
@@ -426,7 +611,15 @@ int main(int argc, char **argv) {
         }
 
         s1gui::DrawSaveDialog(engine, ui);
+        s1gui::DrawAudioDialog(ui);
         ImGui::End();
+
+        // Between frames, never inside one: reopening the stream tears down the
+        // realtime thread the render callback runs on.
+        if (ui.audioApplyRequested) {
+            ui.audioApplyRequested = false;
+            applyAudio();
+        }
 
         // On-screen keyboard note tracking: send note on/off as the pointer
         // moves across keys, through the same queue as hardware MIDI.

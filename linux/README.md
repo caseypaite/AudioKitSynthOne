@@ -93,6 +93,27 @@ Three binaries are produced:
 their libraries are present. JACK dictates its own sample rate and buffer size,
 so `--rate`/`--buffer`/`--latency` apply to PortAudio only.
 
+`--list-devices` prints the outputs the chosen backend can open, and `--device`
+picks one -- by index, or by any unambiguous part of its name:
+
+```bash
+./build/synthone --backend portaudio --list-devices
+    0  HD-Audio Generic: HDMI 0 (hw:0,3)   ALSA   44100 Hz  8ch
+    1  pipewire                            ALSA   44100 Hz  128ch
+    2  default                             ALSA   44100 Hz  128ch  [default]
+
+./build/synthone --backend portaudio --device 0        # by index
+./build/synthone --backend portaudio --device HDMI     # by name
+```
+
+Without `--device` the backend chooses, which is the sound server's default
+output. Naming a hardware device (`hw:1,0`) instead opens the card directly and
+bypasses PipeWire/PulseAudio altogether -- useful when the server's routing is
+the thing you are trying to rule out. Note the indices are not stable: they
+shift as devices appear and disappear, so prefer a name in anything you script.
+JACK has nothing to select, since the server owns the hardware and where the
+ports go is a patchbay question; it reports a single entry.
+
 On PortAudio the output latency follows `--buffer` -- one period, which is the
 floor a callback API can offer:
 
@@ -512,6 +533,35 @@ document, the kind of thing that should follow the user between machines.) A use
 shadows a factory bank of the same name, and saving into a factory bank name
 copies that whole bank into your directory first, leaving the shipped file
 untouched -- so the source tree stays clean.
+
+### Choosing an output device
+
+The **AUDIO** button in the header opens a dialog listing every output the
+current backend can open, grouped by driver family, alongside sample rate and
+buffer size. It shows what the running stream actually settled on -- device,
+rate, buffer and the latency the driver granted -- which is usually the fastest
+way to find out that audio is going somewhere you are not listening to.
+
+Applying reopens the stream between frames, never inside one, since the render
+callback lives on the thread being torn down. Held notes are cut. Changing the
+sample rate additionally rebuilds the DSP kernel, because the wavetable
+increments, envelope rates and LFO phases are all derived from it; the preset
+and tuning are put back afterwards. Every failure path ends with the synth
+audible on the device it had before -- a mistyped device is a smaller problem
+than a synth that has gone quiet.
+
+The choice is remembered in `<user-dir>/audio.json`, deliberately separate from
+anything preset-shaped: which speaker you use belongs to the machine and must
+not travel with a preset or a bank. Both the index and the device name are
+stored, and the name has to still match at that index or the setting falls back
+to automatic -- device indices shift as hardware and sound servers come and go,
+and opening whatever now sits at index 3 is worse than not trying.
+
+The same selection is available headlessly through `--list-devices` and
+`--device` on both hosts (`synthone-offline` writes a file and opens no device
+at all); the GUI additionally accepts `--rate` and `--buffer`. Flags override
+the saved file for that run without overwriting it, so a one-off `--device`
+does not become permanent.
 
 ## How the port works
 

@@ -76,9 +76,22 @@ PaDeviceIndex deviceForHostApi(PaHostApiTypeId type) {
 ///
 /// On Linux the default (ALSA, or PipeWire's ALSA emulation) is already the
 /// right answer and the list is just that one entry.
-std::vector<PaDeviceIndex> candidateOutputDevices(const std::string &hostApi,
+std::vector<PaDeviceIndex> candidateOutputDevices(const std::string &hostApi, int deviceIndex,
                                                   std::string &error) {
     std::vector<PaDeviceIndex> devices;
+
+    // An explicit device answers the question outright. It is deliberately not
+    // followed by fallbacks: someone who picked a device wants to be told it
+    // failed, not to be moved silently to another one.
+    if (deviceIndex != kAutoDevice) {
+        const PaDeviceInfo *info = Pa_GetDeviceInfo(static_cast<PaDeviceIndex>(deviceIndex));
+        if (info == nullptr || info->maxOutputChannels < 2) {
+            error = "device " + std::to_string(deviceIndex) +
+                    " is not a stereo output on this machine";
+            return {};
+        }
+        return {static_cast<PaDeviceIndex>(deviceIndex)};
+    }
 
     if (!hostApi.empty()) {
         for (const auto &entry : kHostApis) {
@@ -110,11 +123,51 @@ std::vector<PaDeviceIndex> candidateOutputDevices(const std::string &hostApi,
     return devices;
 }
 
+/// Holds PortAudio's global init for as long as it is in scope. Pa_Initialize
+/// is reference counted, so enumerating devices while a stream is open is safe
+/// and leaves that stream alone.
+struct PortAudioSession {
+    bool ok = false;
+    PortAudioSession() { ok = Pa_Initialize() == paNoError; }
+    ~PortAudioSession() { if (ok) Pa_Terminate(); }
+    PortAudioSession(const PortAudioSession &) = delete;
+    PortAudioSession &operator=(const PortAudioSession &) = delete;
+};
+
 } // namespace
+
+std::vector<OutputDevice> portAudioOutputDevices() {
+    PortAudioSession session;
+    if (!session.ok) return {};
+
+    const PaDeviceIndex fallback = Pa_GetDefaultOutputDevice();
+    const PaDeviceIndex count = Pa_GetDeviceCount();
+
+    std::vector<OutputDevice> devices;
+    for (PaDeviceIndex i = 0; i < count; ++i) {
+        const PaDeviceInfo *info = Pa_GetDeviceInfo(i);
+        // Stereo out or nothing: the synth renders two channels and has no
+        // mixdown, so a mono or capture-only device would only fail later.
+        if (info == nullptr || info->maxOutputChannels < 2) continue;
+
+        OutputDevice device;
+        device.index = static_cast<int>(i);
+        device.name = info->name != nullptr ? info->name : "output";
+        device.defaultSampleRate = info->defaultSampleRate;
+        device.maxChannels = info->maxOutputChannels;
+        device.isDefault = (i == fallback);
+        if (const PaHostApiInfo *api = Pa_GetHostApiInfo(info->hostApi)) {
+            device.hostApi = api->name != nullptr ? api->name : "";
+        }
+        devices.push_back(std::move(device));
+    }
+    return devices;
+}
 
 class PortAudioBackend : public AudioBackend {
 public:
-    explicit PortAudioBackend(std::string hostApi) : mHostApi(std::move(hostApi)) {}
+    PortAudioBackend(std::string hostApi, int deviceIndex)
+        : mHostApi(std::move(hostApi)), mDeviceIndex(deviceIndex) {}
 
     ~PortAudioBackend() override {
         stop();
@@ -137,7 +190,8 @@ public:
         }
         mInitialised = true;
 
-        const std::vector<PaDeviceIndex> candidates = candidateOutputDevices(mHostApi, error);
+        const std::vector<PaDeviceIndex> candidates =
+            candidateOutputDevices(mHostApi, mDeviceIndex, error);
         if (candidates.empty()) {
             if (error.empty()) error = "PortAudio found no default output device";
             return false;
@@ -257,11 +311,12 @@ private:
     bool           mActive = false;
     std::string    mDeviceName;
     std::string    mHostApi;
+    int            mDeviceIndex = kAutoDevice;
     double         mOutputLatencySec = 0.0;
 };
 
-std::unique_ptr<AudioBackend> makePortAudioBackend(const std::string &hostApi) {
-    return std::make_unique<PortAudioBackend>(hostApi);
+std::unique_ptr<AudioBackend> makePortAudioBackend(const std::string &hostApi, int deviceIndex) {
+    return std::make_unique<PortAudioBackend>(hostApi, deviceIndex);
 }
 
 } // namespace s1

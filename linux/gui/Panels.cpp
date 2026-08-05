@@ -780,6 +780,12 @@ void DrawHeader(s1::Engine &engine, UiState &ui) {
     ToggleValue(ui.showKeyboard, wide ? "KEYBOARD" : "KEYS", ImVec2(wide ? 100.0f : 64.0f, 0));
 
     ImGui::SameLine(0.0f, gapSmall);
+    if (ImGui::Button(wide ? "AUDIO" : "AUD", ImVec2(wide ? 80.0f : 56.0f, 0))) {
+        RefreshAudioDevices(ui);
+        ui.showAudioDialog = true;
+    }
+
+    ImGui::SameLine(0.0f, gapSmall);
     const bool wasLearn = ui.midiLearnMode;
     ToggleValue(ui.midiLearnMode, wide ? "MIDI LEARN" : "LEARN", ImVec2(wide ? 120.0f : 76.0f, 0));
     if (wasLearn && !ui.midiLearnMode) {
@@ -867,6 +873,150 @@ void DrawPresetBrowser(s1::Engine &engine, UiState &ui) {
 // ---------------------------------------------------------------------------
 // Save dialog
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Audio device dialog
+// ---------------------------------------------------------------------------
+
+void RefreshAudioDevices(UiState &ui) {
+    ui.audioDevices = s1::availableOutputDevices(ui.audioBackend);
+}
+
+namespace {
+
+/// Rates worth offering. 0 means "ask the device what it prefers", which is
+/// what the host did before any of this was selectable.
+constexpr int kSampleRates[] = {0, 44100, 48000, 88200, 96000};
+constexpr int kBufferSizes[] = {0, 64, 128, 256, 512, 1024};
+
+std::string rateLabel(int rate) {
+    return rate == 0 ? std::string("device default") : std::to_string(rate) + " Hz";
+}
+
+std::string bufferLabel(int frames, int rate) {
+    if (frames == 0) return "default (256)";
+    std::string label = std::to_string(frames) + " frames";
+    if (rate > 0) {
+        char ms[32];
+        std::snprintf(ms, sizeof(ms), "  (%.2f ms)", 1000.0 * frames / rate);
+        label += ms;
+    }
+    return label;
+}
+
+} // namespace
+
+void DrawAudioDialog(UiState &ui) {
+    if (!ui.showAudioDialog) return;
+
+    ImGui::OpenPopup("Audio Device");
+    ImGui::SetNextWindowSize(ImVec2(560, 0));
+    if (!ImGui::BeginPopupModal("Audio Device", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
+
+    ImGui::TextColored(ImColor(color::kTextDim), "Currently playing through:");
+    ImGui::TextWrapped("%s", ui.audioStatus.empty() ? "(not started)" : ui.audioStatus.c_str());
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // -- backend ------------------------------------------------------------
+    const auto backends = s1::availableBackends();
+    ImGui::SetNextItemWidth(240.0f);
+    if (ImGui::BeginCombo("backend", ui.audioBackend.c_str())) {
+        for (const auto &name : backends) {
+            const bool selected = (name == ui.audioBackend);
+            if (ImGui::Selectable(name.c_str(), selected) && !selected) {
+                ui.audioBackend = name;
+                // Device ids belong to the backend that listed them.
+                ui.audioDeviceIndex = s1::kAutoDevice;
+                RefreshAudioDevices(ui);
+            }
+            if (selected) ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+    }
+
+    // -- device -------------------------------------------------------------
+    std::string currentName = "automatic";
+    for (const auto &device : ui.audioDevices) {
+        if (device.index == ui.audioDeviceIndex) {
+            currentName = device.name;
+            break;
+        }
+    }
+
+    ImGui::SetNextItemWidth(420.0f);
+    if (ImGui::BeginCombo("device", currentName.c_str())) {
+        if (ImGui::Selectable("automatic", ui.audioDeviceIndex == s1::kAutoDevice)) {
+            ui.audioDeviceIndex = s1::kAutoDevice;
+        }
+        std::string lastApi;
+        for (const auto &device : ui.audioDevices) {
+            if (device.index == s1::kAutoDevice) continue;
+            if (device.hostApi != lastApi) {
+                lastApi = device.hostApi;
+                ImGui::Separator();
+                ImGui::TextColored(ImColor(color::kTextDim), "%s", lastApi.c_str());
+            }
+            ImGui::PushID(device.index);
+            const bool selected = (device.index == ui.audioDeviceIndex);
+            std::string label = device.name;
+            if (device.isDefault) label += "   [default]";
+            if (ImGui::Selectable(label.c_str(), selected)) ui.audioDeviceIndex = device.index;
+            if (selected) ImGui::SetItemDefaultFocus();
+            ImGui::PopID();
+        }
+        ImGui::EndCombo();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("rescan")) RefreshAudioDevices(ui);
+
+    // -- rate and buffer ----------------------------------------------------
+    ImGui::SetNextItemWidth(240.0f);
+    if (ImGui::BeginCombo("sample rate", rateLabel(ui.audioSampleRate).c_str())) {
+        for (int rate : kSampleRates) {
+            if (ImGui::Selectable(rateLabel(rate).c_str(), rate == ui.audioSampleRate)) {
+                ui.audioSampleRate = rate;
+            }
+        }
+        ImGui::EndCombo();
+    }
+
+    const int rateForMs = ui.audioSampleRate > 0 ? ui.audioSampleRate : 44100;
+    ImGui::SetNextItemWidth(240.0f);
+    if (ImGui::BeginCombo("buffer", bufferLabel(ui.audioBufferFrames, rateForMs).c_str())) {
+        for (int frames : kBufferSizes) {
+            if (ImGui::Selectable(bufferLabel(frames, rateForMs).c_str(),
+                                  frames == ui.audioBufferFrames)) {
+                ui.audioBufferFrames = frames;
+            }
+        }
+        ImGui::EndCombo();
+    }
+
+    ImGui::Spacing();
+    ImGui::TextColored(ImColor(color::kTextDim),
+                       "Applying restarts the audio stream. Held notes are cut,");
+    ImGui::TextColored(ImColor(color::kTextDim),
+                       "and a rate change rebuilds the DSP and reloads the preset.");
+    if (ui.audioBackend == "jack") {
+        ImGui::TextColored(ImColor(color::kOn),
+                           "JACK dictates its own rate and buffer -- both are ignored.");
+    }
+
+    ImGui::Spacing();
+    if (ImGui::Button("Apply", ImVec2(120, 0))) {
+        ui.audioApplyRequested = true;
+        ui.showAudioDialog = false;
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Close", ImVec2(120, 0))) {
+        ui.showAudioDialog = false;
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+}
 
 void DrawSaveDialog(s1::Engine &engine, UiState &ui) {
     if (!ui.showSaveDialog) return;

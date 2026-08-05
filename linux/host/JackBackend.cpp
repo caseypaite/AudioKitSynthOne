@@ -132,4 +132,18 @@ std::unique_ptr<AudioBackend> makeJackBackend() {
     return std::make_unique<JackBackend>();
 }
 
+/// JACK has nothing to choose between: the server owns the hardware and decides
+/// the rate and buffer size, and where our ports go is a patchbay question, not
+/// a device one. One entry keeps the picker honest rather than pretending
+/// otherwise.
+std::vector<OutputDevice> jackOutputDevices() {
+    OutputDevice device;
+    device.index = kAutoDevice;
+    device.name = "JACK server";
+    device.hostApi = "JACK";
+    device.maxChannels = 2;
+    device.isDefault = true;
+    return {device};
+}
+
 } // namespace s1

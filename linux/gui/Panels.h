@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "AudioBackend.h"
 #include "Engine.h"
 #include "Widgets.h"
 
@@ -73,6 +74,23 @@ struct UiState {
     // MIDI learn
     bool midiLearnMode = false;
 
+    // Audio device dialog.
+    //
+    // The `audio*` fields are the pending choice the dialog edits; nothing acts
+    // on them until audioApplyRequested is set, because reopening the stream
+    // has to happen between frames on the main loop, not mid-widget.
+    bool        showAudioDialog = false;
+    bool        audioApplyRequested = false;
+    std::string audioBackend;                 ///< "jack" | "portaudio"
+    int         audioDeviceIndex = -1;        ///< s1::kAutoDevice, or a device id
+    int         audioSampleRate = 0;          ///< 0 = whatever the device prefers
+    int         audioBufferFrames = 0;        ///< 0 = the backend's own default
+    /// Devices as last enumerated. Refreshed when the dialog opens rather than
+    /// every frame -- enumeration talks to the driver and is not free.
+    std::vector<s1::OutputDevice> audioDevices;
+    /// What the running stream actually settled on, for the dialog to show.
+    std::string audioStatus;
+
     // Status line
     std::string message;
     double      messageTime = 0.0;
@@ -85,5 +103,9 @@ void DrawPanel(Panel panel, s1::Engine &engine, UiState &ui);
 void DrawPresetBrowser(s1::Engine &engine, UiState &ui);
 void DrawKeyboardBar(s1::Engine &engine, UiState &ui);
 void DrawSaveDialog(s1::Engine &engine, UiState &ui);
+void DrawAudioDialog(UiState &ui);
+
+/// Fill ui.audioDevices from the backend named in ui.audioBackend.
+void RefreshAudioDevices(UiState &ui);
 
 } // namespace s1gui
