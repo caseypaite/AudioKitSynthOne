@@ -486,10 +486,6 @@ int main(int argc, char **argv) {
         std::fprintf(stderr, "error: cannot initialise GLFW\n");
         return 1;
     }
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 2);
-    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-
     // Kiosk mode: take the primary monitor at its current resolution unless a
     // --geometry was asked for. On the Pi's 7" panel that is 800x480, and with
     // no window manager running there is nothing else to yield the screen to.
@@ -510,10 +506,58 @@ int main(int argc, char **argv) {
         }
     }
 
-    GLFWwindow *window =
-        glfwCreateWindow(windowWidth, windowHeight, "AudioKit Synth One", monitor, nullptr);
+    // GL 3.2 core is what the ImGui backend is happiest on, but it is not
+    // available everywhere: the Raspberry Pi 4's V3D driver tops out at
+    // OpenGL 3.1 (Mesa 24.2 on Bookworm), and asking for 3.2 core there does
+    // not degrade -- glfwCreateWindow fails outright with GLXBadFBConfig and
+    // the kiosk dies two seconds after every start.
+    //
+    // So try the tiers in order and keep the first that gives a window. The
+    // GLSL string has to move with the context: #version 150 *is* GL 3.2, and
+    // leaving it behind on a 3.1 context would only move the failure into
+    // shader compilation.
+    struct GlTier {
+        int         major;
+        int         minor;
+        int         profile;
+        const char *glsl;
+    };
+    static const GlTier kGlTiers[] = {
+        {3, 2, GLFW_OPENGL_CORE_PROFILE, "#version 150"},
+        {3, 1, GLFW_OPENGL_ANY_PROFILE,  "#version 140"},
+    };
+
+    // Failing a tier is expected, not news, so the error callback is muted
+    // while probing -- otherwise every Pi boot logs a GLXBadFBConfig that
+    // looks like the fault and is not. Whatever survives is reported below.
+    GLFWerrorfun previousErrorCallback = glfwSetErrorCallback(nullptr);
+
+    GLFWwindow *window = nullptr;
+    const char *glslVersion = kGlTiers[0].glsl;
+    std::string lastGlError;
+    for (const GlTier &tier : kGlTiers) {
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, tier.major);
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, tier.minor);
+        glfwWindowHint(GLFW_OPENGL_PROFILE, tier.profile);
+
+        window = glfwCreateWindow(windowWidth, windowHeight, "AudioKit Synth One", monitor,
+                                  nullptr);
+        if (window != nullptr) {
+            glslVersion = tier.glsl;
+            break;
+        }
+        // Take the error so the next attempt starts clean, and keep the text
+        // in case this was the last tier.
+        const char *text = nullptr;
+        glfwGetError(&text);
+        lastGlError = text != nullptr ? text : "unknown error";
+    }
+
+    glfwSetErrorCallback(previousErrorCallback);
+
     if (window == nullptr) {
-        std::fprintf(stderr, "error: cannot create a window\n");
+        std::fprintf(stderr, "error: cannot create a window; no usable OpenGL context (%s)\n",
+                     lastGlError.c_str());
         glfwTerminate();
         return 1;
     }
@@ -530,7 +574,7 @@ int main(int argc, char **argv) {
     ImGui::GetIO().IniFilename = nullptr; // don't litter the cwd
     applyDarkStyle();
     ImGui_ImplGlfw_InitForOpenGL(window, true);
-    ImGui_ImplOpenGL3_Init("#version 150");
+    ImGui_ImplOpenGL3_Init(glslVersion);
 
     // -- loop --------------------------------------------------------------
 
