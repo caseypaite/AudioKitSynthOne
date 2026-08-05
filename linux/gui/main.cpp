@@ -148,11 +148,19 @@ void panelTabs(const char *id, const char *label, s1gui::Panel &current, s1gui::
 
 namespace {
 
-/// Where the chosen output is remembered between runs. Deliberately its own
-/// small file rather than anything preset-shaped: which speaker you use is a
-/// property of the machine, and must not travel with a preset or a bank.
-std::string audioConfigPath(const s1::Engine &engine) {
-    return engine.userDataDir() + "/audio.json";
+/// Where the chosen output is remembered between runs: the data directory that
+/// *holds* the preset directory, never the preset directory itself.
+///
+/// Two reasons it sits outside. Banks are saved as `<bank>.json` right there, so
+/// a bank innocently named "audio" would collide with this file and one would
+/// silently overwrite the other. And --user-dir moves where *presets* live,
+/// which is a different question from which speaker this machine uses -- the
+/// device must not follow a preset collection onto another box, so this path
+/// deliberately ignores that flag.
+std::string audioConfigPath() {
+    const std::filesystem::path presets(s1::Engine::defaultUserDataDir());
+    const std::filesystem::path root = presets.parent_path();
+    return (root.empty() ? std::filesystem::path(".") : root) / "audio.json";
 }
 
 /// Device names come from the driver and are not ours to trust as JSON.
@@ -172,10 +180,10 @@ std::string jsonEscape(const std::string &text) {
     return out;
 }
 
-void loadAudioConfig(const s1::Engine &engine, s1gui::UiState &ui) {
+void loadAudioConfig(s1gui::UiState &ui) {
     s1::JsonValue root;
     std::string error;
-    if (!s1::JsonValue::parseFile(audioConfigPath(engine), root, error) || !root.isObject()) return;
+    if (!s1::JsonValue::parseFile(audioConfigPath(), root, error) || !root.isObject()) return;
 
     if (root.contains("backend")) ui.audioBackend = root["backend"].asString(ui.audioBackend);
     if (root.contains("deviceIndex")) ui.audioDeviceIndex = root["deviceIndex"].asInt(ui.audioDeviceIndex);
@@ -198,7 +206,7 @@ void loadAudioConfig(const s1::Engine &engine, s1gui::UiState &ui) {
     }
 }
 
-void saveAudioConfig(const s1::Engine &engine, const s1gui::UiState &ui) {
+void saveAudioConfig(const s1gui::UiState &ui) {
     std::string deviceName;
     for (const auto &device : ui.audioDevices) {
         if (device.index == ui.audioDeviceIndex) {
@@ -215,9 +223,10 @@ void saveAudioConfig(const s1::Engine &engine, const s1gui::UiState &ui) {
     json += "  \"bufferFrames\": " + std::to_string(ui.audioBufferFrames) + "\n";
     json += "}\n";
 
+    const std::filesystem::path path(audioConfigPath());
     std::error_code ec;
-    std::filesystem::create_directories(engine.userDataDir(), ec);
-    if (FILE *f = std::fopen(audioConfigPath(engine).c_str(), "wb")) {
+    std::filesystem::create_directories(path.parent_path(), ec);
+    if (FILE *f = std::fopen(path.c_str(), "wb")) {
         std::fwrite(json.data(), 1, json.size(), f);
         std::fclose(f);
     }
@@ -323,7 +332,7 @@ int main(int argc, char **argv) {
     // applies a change -- so a one-off --device does not become permanent.
     s1gui::UiState ui;
     ui.audioBackend = backendName;
-    loadAudioConfig(engine, ui);
+    loadAudioConfig(ui);
     if (backendGiven) ui.audioBackend = backendName;
     if (requestedRate > 0) ui.audioSampleRate = requestedRate;
     if (requestedFrames > 0) ui.audioBufferFrames = requestedFrames;
@@ -440,7 +449,7 @@ int main(int argc, char **argv) {
                     backend = std::move(next);
                     ui.audioStatus = describeAudio();
                     ui.notify("audio: " + ui.audioStatus);
-                    saveAudioConfig(engine, ui);
+                    saveAudioConfig(ui);
                     return;
                 }
                 // The new stream refused to start after the kernel had already

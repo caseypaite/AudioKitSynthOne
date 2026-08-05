@@ -550,12 +550,25 @@ and tuning are put back afterwards. Every failure path ends with the synth
 audible on the device it had before -- a mistyped device is a smaller problem
 than a synth that has gone quiet.
 
-The choice is remembered in `<user-dir>/audio.json`, deliberately separate from
-anything preset-shaped: which speaker you use belongs to the machine and must
-not travel with a preset or a bank. Both the index and the device name are
-stored, and the name has to still match at that index or the setting falls back
-to automatic -- device indices shift as hardware and sound servers come and go,
-and opening whatever now sits at index 3 is worse than not trying.
+The choice is remembered in the data directory that *holds* the preset
+directory, never inside it:
+
+```
+Linux    $XDG_DATA_HOME/synthone/audio.json   (default: ~/.local/share/synthone/audio.json)
+Windows  %APPDATA%\SynthOne\audio.json
+```
+
+Two reasons it sits outside. Banks are saved as `<bank>.json` in the preset
+directory, so a bank innocently named "audio" would collide with this file and
+one would silently overwrite the other. And `--user-dir` moves where *presets*
+live, which is a different question from which speaker this machine uses -- so
+this path deliberately ignores that flag. Which speaker you use belongs to the
+machine and must not travel with a preset collection onto another box.
+
+Both the index and the device name are stored, and the name has to still match
+at that index or the setting falls back to automatic -- device indices shift as
+hardware and sound servers come and go, and opening whatever now sits at index 3
+is worse than not trying.
 
 The same selection is available headlessly through `--list-devices` and
 `--device` on both hosts (`synthone-offline` writes a file and opens no device
