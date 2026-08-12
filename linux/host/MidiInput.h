@@ -14,6 +14,7 @@
 #pragma once
 
 #include "MidiSysEx.h"
+#include "PadFilter.h"
 
 #include <atomic>
 #include <cstdint>
@@ -96,8 +97,17 @@ public:
     /// Windows only, and dropped entirely on Linux -- see enqueuePacked()
     /// and AlsaMidi.cpp's run()) rather than routing it to a controller
     /// driver.
+    ///
+    /// `padFilter`/`padButtonQueue` are likewise optional. When both are
+    /// given, a note-on/off whose (channel, note) is claimed in `padFilter`
+    /// (see PadFilter.h) is diverted to `padButtonQueue` instead of `queue`
+    /// -- suppressed from the note/CC path entirely, not just duplicated --
+    /// so a controller driver can turn specific pads into function buttons
+    /// that no longer sound a note.
     void start(MidiQueue *queue, SysExQueue *sysexQueue = nullptr,
-              ProgramChangeQueue *programChangeQueue = nullptr);
+              ProgramChangeQueue *programChangeQueue = nullptr,
+              const PadFilter *padFilter = nullptr,
+              PadButtonQueue *padButtonQueue = nullptr);
     void stop();
 
     /// Enumerate readable MIDI sources on the system.
@@ -125,6 +135,8 @@ private:
     MidiQueue                *mQueue = nullptr;
     SysExQueue                *mSysExQueue = nullptr;
     ProgramChangeQueue        *mProgramChangeQueue = nullptr;
+    const PadFilter           *mPadFilter = nullptr;
+    PadButtonQueue            *mPadButtonQueue = nullptr;
     SysExAssembler             mSysExAssembler;
     std::vector<MidiSource>   mConnected;
     std::atomic<bool>         mRunning{false};

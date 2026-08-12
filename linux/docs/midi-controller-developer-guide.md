@@ -23,8 +23,12 @@ purpose:
 
 - A driver identifies a device by name and, optionally, talks SysEx to it.
 - A driver can seed default CC-to-parameter mappings for its knobs.
-- **Pads and keys need no driver code at all.** They already flow through
-  as ordinary MIDI notes; a driver never intercepts them.
+- **Most pads and keys need no driver code at all.** They flow through as
+  ordinary MIDI notes; a driver never intercepts them by default. A driver
+  *can* opt a specific (channel, note) into a separate function-pad path
+  (see "Pad-button transport" below) when the device's own layout calls for
+  dedicated buttons rather than playable pads -- the Akai MPK Mini mk3
+  driver does this for 8 of its 16 pads.
 - There is no mixer/chain/launcher concept to control, so there's nothing
   resembling Zynthian's `zynthian_ctrldev_zynpad`/`zynmixer` base classes
   here -- one flat `ControllerDriver` interface covers everything this port
@@ -35,25 +39,35 @@ purpose:
 ```
 ALSA seq / WinMM  --(raw bytes)-->  MidiInput reader thread
                                          |
-                    +--------------------+--------------------+
-                    |                    |                    |
-             3-byte channel       SysEx (0xF0..0xF7)    Program Change
-             messages ->      -> SysExAssembler      -> ProgramChangeQueue
-             MidiQueue            -> SysExQueue                |
-                    |                    |                    |
-             audio render         control-thread poll loop (both queues)
-             callback             (`while (gRunning)` /
-             (host/main.cpp        `while (!glfwWindowShouldClose)`)
-             `render` lambda;                |
-             JACK/PortAudio    ControllerDriverManager::dispatchSysEx
-             callback thread)  / dispatchProgramChange
-                    |                    |
-             Engine::handleMidi    driver->onSysEx(...) /
-             (mCcToParameter,      driver->onProgramChange(...)
-              then                          |
-              mDeviceDefaultCc     Engine::setDeviceDefaultCc(...) /
-              fallback)            clearDeviceDefaults()
+              +---------------------+---+---+--------------------+
+              |                     |       |                    |
+       note-on/off,          note-on/off  SysEx (0xF0..0xF7) Program Change
+       PadFilter says NOT     claimed by  -> SysExAssembler  -> ProgramChangeQueue
+       a function pad ->      PadFilter      -> SysExQueue          |
+       MidiQueue               (is a         |                    |
+              |                function     |                    |
+              |                pad) ->      |                    |
+              |                PadButtonQueue                    |
+              |                     |       |                    |
+       audio render          control-thread poll loop (all three queues)
+       callback              (`while (gRunning)` /
+       (host/main.cpp         `while (!glfwWindowShouldClose)`)
+       `render` lambda;                |
+       JACK/PortAudio    ControllerDriverManager::dispatchSysEx /
+       callback thread)  dispatchProgramChange / dispatchPadButton
+              |                     |       |                    |
+       Engine::handleMidi    driver->onPadButton(...)   driver->onSysEx(...) /
+       (mCcToParameter,       -> Engine::panic() /       driver->onProgramChange(...)
+        then                     allNotesOff() /                   |
+        mDeviceDefaultCc          setParameter() (top row) /  Engine::setDeviceDefaultCc(...) /
+        fallback)                 PadReport -> observer            clearDeviceDefaults()
+                                   (bottom row, GUI only)
 ```
+
+**The function-pad path branches *before* `MidiQueue`, inside the reader
+thread itself** -- not after, and not via a second queue that tells `Engine`
+to retroactively ignore a note. See "Pad-button transport" below for why
+that distinction matters.
 
 Two threads matter here, and they're isolated from each other on purpose:
 
@@ -171,6 +185,136 @@ falling through to `mKernel->handleMIDIEvent()` for it) is unchanged.
   fired on (same lookup pattern `enqueueSysExFragment()` already uses for the
   SysEx path) before pushing.
 
+## Pad-button transport (`host/PadFilter.h`)
+
+Some devices dedicate part of their pad grid to functions rather than notes
+(see "Function pads" below for what the Akai MPK Mini mk3 driver does with
+this). Turning a note *off* is a suppression problem, not a routing one --
+and that constraint shapes this whole piece differently from SysEx/Program
+Change above.
+
+**Why this can't be "duplicate into a side queue, tell `Engine` to ignore it
+later," the way SysEx and Program Change work:** `MidiQueue` (the note/CC
+path) is drained inside the *audio render callback* -- every audio buffer,
+millisecond-scale. `SysExQueue`/`ProgramChangeQueue` are drained by the
+*control thread*'s ~50 ms poll loop, which is what calls into driver code.
+If a claimed pad's note-on were pushed to `MidiQueue` as usual and a driver
+only found out about it later via a side queue, the render thread would
+already have turned the note into sound several buffers before the control
+thread could ever tell it not to -- the suppression would always lose that
+race. The only point where a note can be stopped before it's too late is
+**inside the MIDI reader thread itself, at the moment of reception, before
+it's ever pushed to `MidiQueue`.**
+
+Two pieces, both in `host/PadFilter.h`, header-only, platform-independent,
+same publish/consult shape as `Engine::mDeviceDefaultCc`:
+
+- **`PadFilter`** -- a 128-bit claimed-note table (`std::atomic<uint32_t>
+  mNoteBits[4]`) plus an optional claimed channel. A driver (control thread)
+  calls `claimNote()`/`unclaimNote()`/`claimChannel()`/`clear()` -- release
+  stores. The MIDI reader thread calls `isPadNote(channel, note)` -- acquire
+  loads, wait-free, no locks, no allocation on either side. `claimChannel()`
+  is optional: if a driver never calls it, `isPadNote()` matches a claimed
+  note on *any* channel, which is the safer default when a device's pad
+  channel isn't confirmed (see "Function pads" below).
+- **`PadButtonMessage`/`PadButtonQueue`** -- structurally identical to
+  `ProgramChangeMessage`/`ProgramChangeQueue` (SPSC ring, capacity 16),
+  carrying `{channel, note, isNoteOn, sourceId}` from the reader thread to
+  the control thread for whatever a claimed pad should actually *do* --
+  that part is fine to be control-thread-speed, since it's a driver
+  reacting to a discrete button press, not audio.
+
+Reader-thread interception, both platforms, same shape: before a note-on or
+note-off would be pushed to `MidiQueue`, check `PadFilter::isPadNote()`
+first. If claimed, build a `PadButtonMessage` and push it to
+`PadButtonQueue` *instead* -- the note never reaches `MidiQueue`, so it
+never reaches `Engine::handleMidi()`, so it can never sound. Everything else
+(CONTROLLER, PITCHBEND, SYSEX, PGMCHANGE) is untouched by this check.
+
+- ALSA: `run()`'s `SND_SEQ_EVENT_NOTEON`/`NOTEOFF` cases each check
+  `mPadFilter->isPadNote(channel, note)` first; a hit builds and pushes a
+  `PadButtonMessage` (`isNoteOn = velocity > 0` for NOTEON, always `false`
+  for NOTEOFF) and returns without touching `m.length`, so the original
+  note-building code below it never runs.
+- WinMM: `enqueuePacked()` runs the same check right after decoding
+  `kind`/channel/note from the packed short message and before the existing
+  `mQueue->push(m)` call; a hit resolves `sourceId` the same way the
+  Program Change path does (scanning `mHandles` for the callback's
+  `HMIDIIN`) and returns early.
+
+`MidiInput::start()` gained two more optional trailing parameters,
+`const PadFilter *padFilter` and `PadButtonQueue *padButtonQueue`, both
+defaulting to `nullptr` (no suppression, matching pre-existing behaviour)
+for a driver that has no use for this path.
+
+### The driver side: `onPadButton()` and `PadReport`
+
+```cpp
+enum class PadRow { Bottom, Top };
+struct PadReport {
+    bool   reported = false;
+    PadRow row = PadRow::Bottom;
+    int    index = 0; // 0-3
+};
+
+virtual PadReport onPadButton(int channel, int note, bool isDown) { return {}; }
+```
+
+A driver resolves the raw `note` back to a semantic (row, index) itself --
+only it knows its own pad table. Two different things can happen from
+there, and `AkaiMpkMiniMk3` does both:
+
+- **Handle it directly**, using the same `Engine&` the driver already holds
+  from `init()` -- `engine.panic()`, `engine.setParameter(...)`, etc. --
+  and return a default-constructed `PadReport{}` (`reported == false`).
+  This is the right shape for anything the driver framework already has
+  full context for, with no GUI/panel concept involved.
+- **Report it outward** as `PadReport{true, row, index}` for something the
+  driver framework *can't* reach on its own -- `host/ctrldev/` has no
+  `UiState`, no panel concept, and stays that way on purpose (see "Why this
+  exists" above; the headless CLI host has no panels at all). The manager
+  forwards a `reported == true` result to whatever observer the *host*
+  registered, and it's the host's job to decide what a `(row, index)` means.
+
+`ControllerDriverManager::dispatchPadButton(msg)` (mirrors `dispatchSysEx`)
+routes to the loaded driver whose `inputSourceId` matches `msg.sourceId`,
+falling back to offering it to every loaded driver the same way SysEx/PC
+dispatch does; then, if `onPadButton()`'s result is `reported`, calls the
+registered observer:
+
+```cpp
+using PadButtonObserver = std::function<void(PadRow row, int index, bool isDown)>;
+void setPadButtonObserver(PadButtonObserver observer);
+```
+
+`gui/main.cpp` is the only host that registers one -- it maps a `Bottom`
+report's `index` (0-3) directly onto `ui.topPanel`, the same field the
+existing panel-tab click handling already mutates:
+
+```cpp
+driverManager.setPadButtonObserver([&ui](s1::ctrldev::PadRow row, int index, bool isDown) {
+    if (row != s1::ctrldev::PadRow::Bottom || !isDown) return;
+    static constexpr s1gui::Panel kBottomRowPanels[4] = {
+        s1gui::Panel::Generators, s1gui::Panel::Envelopes,
+        s1gui::Panel::Effects, s1gui::Panel::Sequencer,
+    };
+    ui.topPanel = kBottomRowPanels[index];
+});
+```
+
+`host/main.cpp` (headless) never registers an observer -- `Top`-row
+functions still work there (they're handled entirely inside the driver via
+`Engine&`), but there's no panel to switch to, so `Bottom`-row reports are
+simply never observed. Both hosts still drain `PadButtonQueue` into
+`dispatchPadButton()` in their poll loop regardless, since `Top`-row
+handling depends on that drain happening.
+
+`ControllerDriver::init()` gained a fourth parameter, `PadFilter &padFilter`
+-- a driver that wants this feature calls `padFilter.claimNote(...)` from
+wherever it discovers its pad table (for `AkaiMpkMiniMk3`, that's
+`parsePads()`, run from `onSysEx()`); a driver that doesn't want it simply
+never touches the reference.
+
 ## The driver interface (`host/ctrldev/ControllerDriver.h`)
 
 ```cpp
@@ -178,9 +322,10 @@ class ControllerDriver {
 public:
     virtual std::vector<std::string> deviceNameHints() const = 0;
     virtual const char *driverName() const = 0;
-    virtual void init(Engine &engine, MidiOutput *midiOut, bool allowConfigure) = 0;
+    virtual void init(Engine &engine, MidiOutput *midiOut, bool allowConfigure, PadFilter &padFilter) = 0;
     virtual void onSysEx(const uint8_t *data, size_t length) {}
     virtual void onProgramChange(int program) {}
+    virtual PadReport onPadButton(int channel, int note, bool isDown) { return {}; }
 };
 ```
 
@@ -188,21 +333,26 @@ public:
   `MidiSource::name`. A device is claimed if its name contains *any* one of
   them. Keep this list generous: the same physical device can report subtly
   different names across ALSA/WinMM/firmware revisions.
-- **`init(engine, midiOut, allowConfigure)`** -- called once, after the
-  manager has matched a device and tried to pair a same-device output.
-  `midiOut` is `nullptr` when no output was found; `init()` must still work
-  as a plain input in that case (skip anything needing SysEx TX). `midiOut`
-  is a private `MidiOutput` the manager owns and connected itself --
-  independent of any `--midi-out` the user also configured, so the two
-  never fight over one `MidiOutput`'s connection state. `allowConfigure`
-  reflects `--controller-driver-configure` (default off): permission to
-  *write* to the device, not just read from it -- gate any such write
-  behind this rather than firing it unconditionally.
+- **`init(engine, midiOut, allowConfigure, padFilter)`** -- called once,
+  after the manager has matched a device and tried to pair a same-device
+  output. `midiOut` is `nullptr` when no output was found; `init()` must
+  still work as a plain input in that case (skip anything needing SysEx
+  TX). `midiOut` is a private `MidiOutput` the manager owns and connected
+  itself -- independent of any `--midi-out` the user also configured, so
+  the two never fight over one `MidiOutput`'s connection state.
+  `allowConfigure` reflects `--controller-driver-configure` (default off):
+  permission to *write* to the device, not just read from it -- gate any
+  such write behind this rather than firing it unconditionally. `padFilter`
+  is the driver's handle for claiming function pads -- see "Pad-button
+  transport" above; a driver with no function pads never touches it.
 - **`onSysEx(data, length)`** -- a complete, reassembled message addressed
   to this driver's device. Default implementation ignores it.
 - **`onProgramChange(program)`** -- a Program Change addressed to this
   driver's device arrived, `program` in `[0,127]`. Default implementation
   ignores it. The hook for mode/bank switching -- see below.
+- **`onPadButton(channel, note, isDown)`** -- a note claimed via
+  `padFilter.claimNote()` fired, diverted before it could reach `MidiQueue`.
+  Default implementation reports nothing. See "Pad-button transport" above.
 
 ## The manager (`host/ctrldev/ControllerDriverManager`)
 
@@ -215,7 +365,7 @@ const Entry kDrivers[] = {
 };
 ```
 
-`load(wantedName, engine, connectedInputs, allowConfigure, status)`:
+`load(wantedName, engine, connectedInputs, allowConfigure, padFilter, status)`:
 
 1. `wantedName == "off"` -> does nothing, returns `false`.
 2. For each registered driver where `wantedName == "auto"` or matches its
@@ -228,16 +378,19 @@ const Entry kDrivers[] = {
    - Fall back to an identical port *name* (the only signal on WinMM, where
      input and output devices are independently numbered).
 4. Open a private `MidiOutput` for TX if an output was found; call
-   `driver->init(engine, outPtrOrNull, allowConfigure)`.
+   `driver->init(engine, outPtrOrNull, allowConfigure, padFilter)`.
 5. Fill `status` with something printable either way (what loaded and from
    where, or why nothing did) -- `host/main.cpp` prints this on a `[ctrl]`
    status line; `gui/main.cpp` prints it once at startup if something
    loaded.
 
-`dispatchSysEx(msg)`/`dispatchProgramChange(msg)` route a message to the
-loaded driver whose `inputSourceId` matches `msg.sourceId`; if nothing
-matches (unset source id, or a startup race), it's offered to every loaded
-driver rather than dropped.
+`dispatchSysEx(msg)`/`dispatchProgramChange(msg)`/`dispatchPadButton(msg)`
+route a message to the loaded driver whose `inputSourceId` matches
+`msg.sourceId`; if nothing matches (unset source id, or a startup race),
+it's offered to every loaded driver rather than dropped.
+`dispatchPadButton()` additionally forwards a `reported` result to the
+observer registered via `setPadButtonObserver()` -- see "Pad-button
+transport" above.
 
 `Loaded` (the manager's internal per-driver record) stores its `MidiOutput`
 by value inside a `std::vector<std::unique_ptr<Loaded>>`, not
@@ -358,6 +511,67 @@ slot 4-8 clears the knob defaults and leaves them there, deliberately -- add
 a row to `kModeTargets` (and bump `kModeCount`) to give a slot a purpose
 rather than inventing a mapping speculatively.
 
+## Function pads: top row transport, bottom row tab-switch
+
+Built on the "Pad-button transport" mechanism above. Rather than playing
+notes, 8 of the MPK Mini mk3's 16 pads are claimed as dedicated buttons:
+
+| Table index | Silkscreen (assumed) | Row | Behavior |
+| --- | --- | --- | --- |
+| 0-3 | PAD1-4 | Bottom | Reported outward as `PadReport{true, Bottom, 0..3}` |
+| 4-7 | PAD5-8 | Top | Handled internally, never reported |
+
+**Bottom row** -- `gui/main.cpp`'s observer maps index 0-3 directly onto
+`ui.topPanel`: MAIN (Generators), ENV (Envelopes), FX (Effects), SEQ
+(Sequencer) -- a direct-select shortcut for 4 of the app's 6 panels. This is
+GUI-only; the headless `synthone` host has no panel concept, so a bottom-row
+press there is simply never observed (the note is still suppressed --
+`PadFilter` operates below the GUI/headless split -- it just doesn't do
+anything else there).
+
+**Top row** -- handled entirely inside `AkaiMpkMiniMk3::onPadButton()`,
+directly against its own `Engine&`, on the down edge only (`isDown`):
+
+| Index | Function | Implementation |
+| --- | --- | --- |
+| 4 | Panic | `engine.panic()` |
+| 5 | All notes off | `engine.allNotesOff()` |
+| 6 | Arp/Seq on-off | toggles `arpIsOn` via `setParameter`/`getParameter` |
+| 7 | Arp<->Seq mode | toggles `arpIsSequencer` the same way |
+
+These four were chosen as the closest things to "transport" Synth One
+actually has -- there's no play/stop/record; the arp/sequencer just runs
+once armed, so on/off and arp-vs-sequencer-mode are the two switches that
+matter live.
+
+**Discovery**: `parsePads()` runs from `onSysEx()`, right before
+`parseKnobs()`, reading the pad table's first 8 notes (table offset 43,
+3 bytes per pad -- see the protocol reference below) and claiming each one
+in `PadFilter`. It also keeps a local `mPadNote[8]` so `onPadButton()` can
+resolve a raw note back to a table index. Same defensive style as
+`parseKnobs()`: an implausible note (`> 127`) or a body too short to
+contain the whole table aborts the claim entirely rather than claiming a
+partial or wrong set.
+
+**Pads are re-discovered on *every* `onProgramChange()`, not just the 4
+designed knob modes (0-3).** `clearPadClaims()` runs unconditionally at the
+top of `onProgramChange()`, and a fresh query is sent for every program
+number 0-8 -- unlike the knob targets, which stay unbound outside the
+designed modes, pad repurposing has to survive *any* onboard mode switch,
+since there's no reason a user switching to an undesigned program slot
+would expect their transport/tab-switch buttons to start playing notes
+again.
+
+**Known unverified risk**: the pad table's index-to-physical-pad mapping
+(table index N == silkscreened PAD(N+1), indices 0-3 = bottom row, 4-7 =
+top row) is a documented assumption, not a confirmed fact -- there is no
+available source that pins table order to physical layout for this device.
+If wrong, the practical effect is top and bottom row functions being
+swapped, not notes leaking through or a crash; see "Known gaps" below. Also
+unconfirmed: whether pads share the keybed's MIDI channel or use a distinct
+one -- `parsePads()` never calls `PadFilter::claimChannel()`, so claims
+default to matching on any channel, which degrades safely either way.
+
 ## Adding a driver for a new controller
 
 1. Create `host/ctrldev/YourDevice.h`/`.cpp`, modelled on
@@ -370,10 +584,14 @@ rather than inventing a mapping speculatively.
    `init()` can be as simple as calling `engine.setDeviceDefaultCc()` with
    fixed CCs the device is documented to send -- no need to touch
    `onSysEx()` at all in that case.
-5. Pads/keys need *no* driver code, ever -- they already work via the
+5. Pads/keys need *no* driver code by default -- they already work via the
    ordinary `MidiQueue -> Engine::handleMidi()` path regardless of which
    channel they're sent on. Only write code for what genuinely needs
-   device-specific handling (SysEx identification, knob CC discovery).
+   device-specific handling (SysEx identification, knob CC discovery). If
+   the device has dedicated function pads that should stop playing notes
+   and do something else instead, see "Pad-button transport" and "Function
+   pads" above -- claim them via the `padFilter` passed into `init()` and
+   implement `onPadButton()`.
 6. **Don't guess at CC numbers you haven't confirmed.** CC 1 (mod wheel)
    and CC 64 (sustain) are universal MIDI conventions; seeding a device
    default onto one of those hijacks it for anyone who also uses that
@@ -395,6 +613,21 @@ rather than inventing a mapping speculatively.
   on `0xF0`), interleaved Realtime bytes, overflow handling, and both
   queues' push/pop/capacity behaviour. Run this after touching
   `MidiSysEx.h` -- it's fast and needs nothing else built.
+- **`PadFilter`/`PadButtonQueue`, and the MPK driver's pad-table parsing**
+  are covered the same way by `tools/pad_filter_test.cpp`
+  (`cmake --build build --target pad_filter_test && ./build/pad_filter_test`).
+  Claim/unclaim/channel-wildcard `PadFilter` logic and `PadButtonQueue`
+  push/pop/capacity are tested directly; the MPK driver section builds a
+  synthetic 254-byte reply (see `buildSyntheticReply()` in that file),
+  drives it through `onSysEx()` on an unstarted `s1::Engine` (safe, since
+  every `Engine` method a driver reaches for -- `panic()`,
+  `allNotesOff()`, `setParameter()`, `getParameter()` -- guards on
+  `if (mKernel)` internally), and confirms all 8 claimed notes resolve
+  correctly through `onPadButton()`, an out-of-table note degrades to
+  unreported rather than crashing, and `onProgramChange()` clears prior
+  claims immediately. Run this after touching `PadFilter.h`,
+  `AkaiMpkMiniMk3.cpp`'s pad handling, or the `ControllerDriver`/Manager
+  pad-button interface.
 - **A new driver's parsing logic** (anything in `onSysEx()`) is testable
   the same way: hand-build a synthetic byte sequence matching your device's
   documented envelope and feed it through directly, no hardware needed for
@@ -446,7 +679,7 @@ command byte `0x67`, is what `onSysEx()` checks before trusting a reply):
 | --- | --- |
 | 7-22 | program name (16 chars) |
 | 23-42 | pads channel, aftertouch, keybed channel, keybed octave, arp settings, tempo, joystick config |
-| **43-90** | **16 pads x 3 bytes each: note, program-change, CC** (not parsed -- pads pass through as plain notes, see above) |
+| **43-90** | **16 pads x 3 bytes each: note, program-change, CC** -- first 8 (offsets 43-66) parsed by `parsePads()` and claimed as function pads; see "Function pads" above |
 | **91-250** | **8 knobs x 20 bytes each: mode (0=absolute/1=relative), CC, min, max, name[16]** |
 | 251 | transpose |
 
@@ -464,10 +697,11 @@ knobs stay unbound," never "the knobs are bound to something wrong."
 `writeProgram()` (the `CMD_WRITE_DATA` path) is implemented but not called
 anywhere automatically, even when `--controller-driver-configure` is
 passed -- it's reserved for a future pass once the read path above has seen
-real hardware. If you pick this up: the pad-table offset (43) is documented
-above but currently unused by any code; validate it the same way before
-writing to it, since a wrong write could alter what's stored on the device
-itself, not just what this driver reads.
+real hardware. If you pick this up: the pad-table offset (43) is now read
+by `parsePads()` (see "Function pads" above) but still never written by
+this driver; validate against real hardware before writing to it, since a
+wrong write could alter what's stored on the device itself, not just what
+this driver reads.
 
 ## Known gaps / where to look before trusting this in production
 
@@ -488,3 +722,22 @@ itself, not just what this driver reads.
   (`deviceNameHints()`) is unconfirmed -- check with `--list-midi` on real
   Windows hardware and extend the hint list if the reported name differs
   from the ALSA one.
+- **Function pad table order vs. physical layout is unconfirmed.** The
+  assumption that table index N corresponds to silkscreened PAD(N+1)
+  (indices 0-3 = bottom row, 4-7 = top row) has no independently confirmed
+  source; if wrong on real hardware, the practical effect is the top-row
+  transport functions and bottom-row tab-switch functions being swapped,
+  not notes leaking through or a crash. See "Function pads" above.
+- **Whether pads share the keybed's MIDI channel is unconfirmed.**
+  `parsePads()` never calls `PadFilter::claimChannel()`, so a claimed pad
+  note is suppressed on *any* incoming channel -- deliberately permissive,
+  to degrade safely if the pads turn out to use a different channel than
+  assumed, at the cost of (in principle) also suppressing that same note
+  number played on an unrelated channel from a *different* connected
+  device. Not a concern with a single connected controller, which is the
+  common case this framework targets.
+- The pad-button interception path (`PadFilter`, reader-thread diversion in
+  `AlsaMidi.cpp`/`WinMidi.cpp`) is covered by `tools/pad_filter_test.cpp`
+  and by manual Linux + Windows(-cross-compiled) build verification, but --
+  like the rest of the WinMM path above -- has not been run against real
+  Windows MIDI hardware.

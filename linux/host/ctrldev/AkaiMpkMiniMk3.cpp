@@ -2,13 +2,23 @@
 //  AkaiMpkMiniMk3.cpp
 //  AudioKitSynthOne - Linux / Windows port
 //
-//  Driver for the Akai MPK Mini mk3. The 16 pads and the keybed need no
-//  special handling at all -- they flow through the ordinary
-//  MidiQueue -> Engine::handleMidi() path as regular notes, exactly like any
-//  other MIDI keyboard, regardless of which MIDI channel the device sends
-//  them on. This driver exists only to give the 8 knobs sensible default
-//  parameter targets (Engine::setDeviceDefaultCc), discovered by querying the
-//  device's own currently-stored program over SysEx.
+//  Driver for the Akai MPK Mini mk3. The keybed needs no special handling at
+//  all -- it flows through the ordinary MidiQueue -> Engine::handleMidi()
+//  path as regular notes, exactly like any other MIDI keyboard, regardless
+//  of which MIDI channel the device sends on.
+//
+//  8 of the 16 pads (table indices 0-7 -- see parsePads()) are claimed as
+//  function pads via PadFilter (host/PadFilter.h): they stop playing notes
+//  entirely and become dedicated buttons instead. Bottom row (indices 0-3,
+//  silkscreened PAD1-4): reported outward as a PadReport for the host to
+//  turn into a GUI panel switch, since this driver has no UiState access of
+//  its own. Top row (indices 4-7, PAD5-8): handled internally via Engine& --
+//  panic, all-notes-off, arp on/off, arp<->sequencer mode. The remaining 8
+//  pads (table indices 8-15) are left unclaimed and play notes normally.
+//
+//  This driver also gives the 8 knobs sensible default parameter targets
+//  (Engine::setDeviceDefaultCc), discovered by querying the device's own
+//  currently-stored program over SysEx.
 //
 //  Modes: the device's PAD CONTROLS row has a PROG SELECT button, a factory,
 //  no-reprogramming-required way to switch between up to 9 onboard "program"
@@ -39,6 +49,8 @@
 
 #include "AkaiMpkMiniMk3.h"
 
+#include <algorithm>
+#include <cstdint>
 #include <cstring>
 #include <vector>
 
@@ -63,9 +75,16 @@ constexpr uint8_t kCmdIncomingData   = 0x67; // the device's reply to a query
 constexpr int kBodyLength      = 246; // bytes from `program slot` onward, per the length field
 constexpr int kFullBodyLength  = 252; // manufacturer..transpose inclusive
 constexpr int kWireReplyLength = 254; // 0xF0 + kFullBodyLength + 0xF7
-// Pads live at offset 43 (16 x 3 bytes: note, program-change, CC) but need no
-// parsing here -- see the file header comment, they pass through as ordinary
-// notes with zero driver code.
+// 16 pads x 3 bytes each: note, program-change, CC. Confirmed offset (43 +
+// 16*3 == 91 == kOffKnobs below, a self-consistency check on both
+// constants). Only the first 8 table entries (kFunctionPadCount) are
+// claimed as function pads -- see parsePads() and the file header comment
+// for which table index is assumed to be which physical pad. The
+// index-to-physical-pad correspondence itself is NOT confirmed against real
+// hardware (see the file header and the developer guide's known-gaps list).
+constexpr int kOffPads          = 43;
+constexpr int kPadStride        = 3;
+constexpr int kFunctionPadCount = 8;
 constexpr int kOffKnobs   = 91; // 8 knobs x 20 bytes: mode, CC, min, max, name[16]
 constexpr int kKnobStride = 20;
 constexpr int kKnobCount  = 8;
@@ -117,10 +136,12 @@ public:
 
     const char *driverName() const override { return "akai-mpk-mini-mk3"; }
 
-    void init(Engine &engine, MidiOutput *midiOut, bool allowConfigure) override {
+    void init(Engine &engine, MidiOutput *midiOut, bool allowConfigure,
+             PadFilter &padFilter) override {
         mEngine = &engine;
         mMidiOut = midiOut;
         mAllowConfigure = allowConfigure;
+        mPadFilter = &padFilter;
 
         // No hardcoded factory-CC fallback: common factory defaults vary by
         // firmware/program slot and were never confirmed against real
@@ -146,6 +167,7 @@ public:
             return; // not a reply to our query
         }
 
+        parsePads(body, kFullBodyLength);
         parseKnobs(body, kFullBodyLength);
     }
 
@@ -158,22 +180,77 @@ public:
         // query that never completes leaves the knobs safely unbound rather
         // than silently keeping the old mode's mapping under the new one.
         mEngine->clearDeviceDefaults();
+        clearPadClaims();
 
-        if (program < 0 || program >= kModeCount) {
-            // No designed target set for this slot -- stay cleared rather
-            // than guess. mCurrentMode is left as-is so a stray reply from
-            // an in-flight query for the *previous* mode can't be
-            // misattributed to this one; see parseKnobs()'s bounds check.
-            return;
-        }
-
-        mCurrentMode = program;
+        // Unlike the knob-target lookup below, pad repurposing has to
+        // survive *every* onboard mode switch -- it's a permanent host-side
+        // feature, not something that should turn off just because the user
+        // flipped to an undesigned program. So a query goes out regardless
+        // of whether `program` has a knob-target row; onSysEx()/parsePads()
+        // will re-claim the 8 function pads from whatever this program's
+        // table actually says, while onSysEx()/parseKnobs() separately
+        // bails out (via the mCurrentMode bounds check below) if there's no
+        // knob-target row for it.
+        mCurrentMode = (program >= 0 && program < kModeCount) ? program : -1;
         if (mMidiOut != nullptr && mMidiOut->isConnected()) {
             sendQuery(program);
         }
     }
 
+    /// Resolves a diverted pad note back to a semantic pad (table index
+    /// 0-3 = bottom row PAD1-4, 4-7 = top row PAD5-8 -- see the file header
+    /// for the unverified index-to-physical-pad assumption this rests on).
+    /// Bottom row: reported outward, since panel-switching needs UiState
+    /// this driver doesn't have. Top row: handled here directly via
+    /// Engine&, only on the down edge (acting again on release would be
+    /// harmless for these particular actions, but doesn't match how a
+    /// physical button press is naturally understood).
+    PadReport onPadButton(int channel, int note, bool isDown) override {
+        (void)channel; // claimed with a wildcard channel -- see parsePads()
+        int index = -1;
+        for (int i = 0; i < kFunctionPadCount; ++i) {
+            if (mPadNote[i] == static_cast<uint8_t>(note)) {
+                index = i;
+                break;
+            }
+        }
+        if (index < 0) return {}; // shouldn't happen -- PadFilter only ever
+                                  // diverts notes this driver itself
+                                  // claimed -- but degrade to "ignore"
+                                  // rather than assume, e.g. across a
+                                  // clear()/re-claim race at a mode-switch
+                                  // edge.
+
+        if (index < 4) {
+            return PadReport{true, PadRow::Bottom, index};
+        }
+
+        if (isDown && mEngine != nullptr) {
+            switch (index - 4) {
+                case 0: mEngine->panic(); break;
+                case 1: mEngine->allNotesOff(); break;
+                case 2:
+                    mEngine->setParameter(
+                        arpIsOn, mEngine->getParameter(arpIsOn) != 0.0f ? 0.0f : 1.0f);
+                    break;
+                case 3:
+                    mEngine->setParameter(
+                        arpIsSequencer,
+                        mEngine->getParameter(arpIsSequencer) != 0.0f ? 0.0f : 1.0f);
+                    break;
+                default: break;
+            }
+        }
+        return {};
+    }
+
 private:
+    void clearPadClaims() {
+        if (mPadFilter != nullptr) mPadFilter->clear();
+        std::fill(std::begin(mPadNote), std::end(mPadNote), uint8_t{0xFF});
+    }
+
+
     void sendQuery(int program) {
         const uint8_t msg[] = {0xF0,
                                kManufacturerAkai,
@@ -185,6 +262,35 @@ private:
                                static_cast<uint8_t>(program),
                                0xF7};
         mMidiOut->sendSysEx(msg, sizeof(msg));
+    }
+
+    /// Reads the first kFunctionPadCount of the 16 pad-table entries and
+    /// claims each note in mPadFilter, so the MIDI reader thread diverts
+    /// them away from the note/CC path from this point on. Bails to "claim
+    /// nothing" (matching parseKnobs()'s degrade-safely style) if the table
+    /// doesn't fit in the reply, or if any note byte is out of MIDI's 0-127
+    /// range -- an implausible value the same way parseKnobs() treats a CC
+    /// above 127, aborting the whole claim rather than accepting a partial
+    /// one built on a wrong offset.
+    void parsePads(const uint8_t *body, int bodyLength) {
+        clearPadClaims();
+        if (mPadFilter == nullptr) return;
+        if (kOffPads + kFunctionPadCount * kPadStride > bodyLength) return;
+
+        uint8_t notes[kFunctionPadCount];
+        for (int i = 0; i < kFunctionPadCount; ++i) {
+            const uint8_t *pad = body + kOffPads + i * kPadStride;
+            const uint8_t note = pad[0];
+            if (note > 127) return; // implausible -- leave everything unclaimed
+            notes[i] = note;
+        }
+        for (int i = 0; i < kFunctionPadCount; ++i) {
+            mPadNote[i] = notes[i];
+            mPadFilter->claimNote(notes[i]);
+        }
+        // No claimChannel() call: the pad channel has no confirmed source in
+        // this driver (see the file header), so this relies on PadFilter's
+        // default of matching any channel.
     }
 
     /// Reads the 8 knob blocks from a confirmed-length, confirmed-envelope
@@ -239,11 +345,19 @@ private:
     Engine     *mEngine = nullptr;
     MidiOutput *mMidiOut = nullptr;
     bool        mAllowConfigure = false;
+    PadFilter  *mPadFilter = nullptr;
     // The onboard program number a pending/completed knob query applies to;
     // indexes kModeTargets. Set before sendQuery() so a reply arriving in
     // onSysEx() knows which target set to seed. See onProgramChange() and
-    // parseKnobs().
+    // parseKnobs(). -1 when the current program has no knob-target row
+    // (pads can still be claimed for it; only the knob mapping is unset).
     int mCurrentMode = 0;
+    // Table index (0..kFunctionPadCount-1) -> the note number currently
+    // claimed for it, or 0xFF if none/implausible. Lets onPadButton()
+    // resolve a raw note back to a semantic pad without PadFilter itself
+    // knowing anything semantic. Parallel array to kOffPads's table, set by
+    // parsePads().
+    uint8_t mPadNote[kFunctionPadCount] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 };
 
 } // namespace

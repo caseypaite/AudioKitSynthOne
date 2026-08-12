@@ -5,8 +5,8 @@
 //  Matches connected MIDI input ports against the compiled-in controller
 //  drivers by name (Zynthian-style dev_ids matching, scaled down: a small
 //  static table, not a plugin system), loads whichever one(s) claim a
-//  connected device, and routes reassembled SysEx and Program Change
-//  messages to them.
+//  connected device, and routes reassembled SysEx, Program Change and
+//  function-pad-button messages to them.
 //
 //  No hotplug: matching happens once at startup against whatever MidiInput
 //  already connected, mirroring this codebase's existing MIDI port handling
@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -23,6 +24,7 @@
 #include "MidiInput.h"  // MidiSource
 #include "MidiOutput.h"
 #include "MidiSysEx.h"
+#include "PadFilter.h"
 
 namespace s1 { class Engine; }
 
@@ -44,10 +46,15 @@ public:
     /// fight over one MidiOutput's connection state.
     /// Fills `status` with a human-readable summary either way (what
     /// loaded, or why nothing did) for the caller to print. `allowConfigure`
-    /// is forwarded to the driver's init() -- see ControllerDriver::init().
+    /// and `padFilter` are forwarded to the driver's init() -- see
+    /// ControllerDriver::init(). `padFilter` is owned by the caller and must
+    /// outlive both this manager and the MidiInput it was also given to
+    /// (see PadFilter.h) -- it's passed empty here and populated
+    /// asynchronously once the driver's own discovery completes, the same
+    /// timing Engine::mDeviceDefaultCc already relies on.
     bool load(const std::string &wantedName, Engine &engine,
              const std::vector<MidiSource> &connectedInputs, bool allowConfigure,
-             std::string &status);
+             PadFilter &padFilter, std::string &status);
 
     /// Routes a fully-reassembled SysEx message (from SysExQueue) to
     /// whichever loaded driver's input it matches, by SysExMessage::sourceId
@@ -62,6 +69,22 @@ public:
     /// to every loaded driver if unmatched.
     void dispatchProgramChange(const ProgramChangeMessage &msg);
 
+    /// Routes a diverted pad-button message (from PadButtonQueue) the same
+    /// way, by sourceId. Calls the matching driver's onPadButton(); if that
+    /// returns a reported PadReport (a bottom-row/GUI concern the driver
+    /// can't act on itself), forwards it to the registered observer, if any.
+    void dispatchPadButton(const PadButtonMessage &msg);
+
+    /// Registered by a GUI host to react to a bottom-row pad's panel-select
+    /// report -- never invoked for a top-row pad, since a driver handles
+    /// those internally via its own Engine& and never sets
+    /// PadReport::reported for them (a convention followed by
+    /// AkaiMpkMiniMk3, not enforced here). Unset (the default) means
+    /// nothing is listening -- the headless CLI host never registers one,
+    /// since it has no panels. One slot, not a list: exactly one GUI.
+    using PadButtonObserver = std::function<void(PadRow row, int index, bool isDown)>;
+    void setPadButtonObserver(PadButtonObserver observer) { mPadButtonObserver = std::move(observer); }
+
     bool loaded() const { return !mLoaded.empty(); }
 
 private:
@@ -74,6 +97,7 @@ private:
     // drivers load never moves/copies a live MidiOutput (which owns a raw
     // ALSA seq handle / WinMM handles with no defined copy semantics).
     std::vector<std::unique_ptr<Loaded>> mLoaded;
+    PadButtonObserver                    mPadButtonObserver;
 };
 
 } // namespace s1::ctrldev

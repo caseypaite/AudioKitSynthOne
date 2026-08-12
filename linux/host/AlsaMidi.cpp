@@ -144,11 +144,14 @@ std::vector<MidiSource> MidiInput::listSources() {
 }
 
 void MidiInput::start(MidiQueue *queue, SysExQueue *sysexQueue,
-                      ProgramChangeQueue *programChangeQueue) {
+                      ProgramChangeQueue *programChangeQueue,
+                      const PadFilter *padFilter, PadButtonQueue *padButtonQueue) {
     if (mSeq == nullptr || mRunning.load()) return;
     mQueue = queue;
     mSysExQueue = sysexQueue;
     mProgramChangeQueue = programChangeQueue;
+    mPadFilter = padFilter;
+    mPadButtonQueue = padButtonQueue;
     mRunning.store(true);
     mThread = std::thread(&MidiInput::run, this);
 }
@@ -175,18 +178,49 @@ void MidiInput::run() {
             const uint8_t channel = static_cast<uint8_t>(event->data.note.channel & 0x0F);
 
             switch (event->type) {
-                case SND_SEQ_EVENT_NOTEON:
+                case SND_SEQ_EVENT_NOTEON: {
+                    const uint8_t note = static_cast<uint8_t>(event->data.note.note);
+                    const uint8_t velocity = static_cast<uint8_t>(event->data.note.velocity);
+                    // A note-on with velocity 0 is the running-status idiom
+                    // for note-off; PadButtonMessage wants the true
+                    // down/up state.
+                    if (mPadFilter != nullptr && mPadFilter->isPadNote(channel, note)) {
+                        if (mPadButtonQueue != nullptr) {
+                            PadButtonMessage pb;
+                            pb.channel = channel;
+                            pb.note = note;
+                            pb.isNoteOn = velocity > 0;
+                            pb.sourceId = event->source.client;
+                            mPadButtonQueue->push(pb);
+                        }
+                        break; // suppressed -- never reaches MidiQueue; see PadFilter.h
+                    }
                     m.length = 3;
                     m.data[0] = static_cast<uint8_t>(0x90 | channel);
-                    m.data[1] = static_cast<uint8_t>(event->data.note.note);
-                    m.data[2] = static_cast<uint8_t>(event->data.note.velocity);
+                    m.data[1] = note;
+                    m.data[2] = velocity;
                     break;
-                case SND_SEQ_EVENT_NOTEOFF:
+                }
+                case SND_SEQ_EVENT_NOTEOFF: {
+                    const uint8_t note = static_cast<uint8_t>(event->data.note.note);
+                    const uint8_t velocity = static_cast<uint8_t>(event->data.note.velocity);
+                    if (mPadFilter != nullptr && mPadFilter->isPadNote(channel, note)) {
+                        if (mPadButtonQueue != nullptr) {
+                            PadButtonMessage pb;
+                            pb.channel = channel;
+                            pb.note = note;
+                            pb.isNoteOn = false;
+                            pb.sourceId = event->source.client;
+                            mPadButtonQueue->push(pb);
+                        }
+                        break;
+                    }
                     m.length = 3;
                     m.data[0] = static_cast<uint8_t>(0x80 | channel);
-                    m.data[1] = static_cast<uint8_t>(event->data.note.note);
-                    m.data[2] = static_cast<uint8_t>(event->data.note.velocity);
+                    m.data[1] = note;
+                    m.data[2] = velocity;
                     break;
+                }
                 case SND_SEQ_EVENT_CONTROLLER:
                     m.length = 3;
                     m.data[0] = static_cast<uint8_t>(0xB0 |

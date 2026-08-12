@@ -416,6 +416,14 @@ else()
         target_link_libraries(synthone_host PUBLIC ${S1_PORTAUDIO_LIB})
     endif()
 
+    # pad_filter_test: exercises PadFilter/PadButtonQueue and the Akai MPK
+    # Mini mk3 driver's pad-table parsing against synthetic data -- unlike
+    # sysex_assembler_test, this one needs the real Engine and driver code
+    # (synthone_core/synthone_host), so it lives here rather than up with
+    # that unconditional target.
+    add_executable(pad_filter_test tools/pad_filter_test.cpp)
+    target_link_libraries(pad_filter_test PRIVATE synthone_host)
+
     add_executable(synthone host/main.cpp)
     target_link_libraries(synthone PRIVATE synthone_host)
     target_compile_options(synthone PRIVATE -Wall)

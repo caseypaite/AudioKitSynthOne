@@ -39,7 +39,8 @@ std::vector<std::string> ControllerDriverManager::availableDriverNames() {
 
 bool ControllerDriverManager::load(const std::string &wantedName, Engine &engine,
                                    const std::vector<MidiSource> &connectedInputs,
-                                   bool allowConfigure, std::string &status) {
+                                   bool allowConfigure, PadFilter &padFilter,
+                                   std::string &status) {
     if (wantedName == "off") {
         status = "off";
         return false;
@@ -104,7 +105,7 @@ bool ControllerDriverManager::load(const std::string &wantedName, Engine &engine
         if (outPtr == nullptr) status += " (SysEx TX unavailable)";
 
         loaded->driver = std::move(driver);
-        loaded->driver->init(engine, outPtr, allowConfigure);
+        loaded->driver->init(engine, outPtr, allowConfigure, padFilter);
         mLoaded.push_back(std::move(loaded));
         return true;
     }
@@ -134,6 +135,22 @@ void ControllerDriverManager::dispatchProgramChange(const ProgramChangeMessage &
         }
     }
     for (auto &loaded : mLoaded) loaded->driver->onProgramChange(msg.program);
+}
+
+void ControllerDriverManager::dispatchPadButton(const PadButtonMessage &msg) {
+    auto handle = [&](Loaded &loaded) {
+        const PadReport report = loaded.driver->onPadButton(msg.channel, msg.note, msg.isNoteOn);
+        if (report.reported && mPadButtonObserver) {
+            mPadButtonObserver(report.row, report.index, msg.isNoteOn);
+        }
+    };
+    for (auto &loaded : mLoaded) {
+        if (loaded->inputSourceId == msg.sourceId) {
+            handle(*loaded);
+            return;
+        }
+    }
+    for (auto &loaded : mLoaded) handle(*loaded);
 }
 
 } // namespace s1::ctrldev

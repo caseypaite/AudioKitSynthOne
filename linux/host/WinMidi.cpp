@@ -127,6 +127,30 @@ void MidiInput::enqueuePacked(uint32_t packed, void *handle) {
     const uint8_t kind = static_cast<uint8_t>(status & 0xF0);
     m.length = (kind == 0xC0 || kind == 0xD0) ? 2 : 3;
 
+    // A claimed function pad is diverted here and never reaches MidiQueue --
+    // suppressed, not duplicated. See PadFilter.h for why this has to
+    // happen synchronously in this callback rather than later.
+    if (kind == 0x90 || kind == 0x80) {
+        const int channel = status & 0x0F;
+        const int note = m.data[1];
+        if (mPadFilter != nullptr && mPadFilter->isPadNote(channel, note)) {
+            if (mPadButtonQueue != nullptr) {
+                PadButtonMessage pb;
+                pb.channel = channel;
+                pb.note = note;
+                pb.isNoteOn = (kind == 0x90) && m.data[2] > 0;
+                for (size_t i = 0; i < mHandles.size(); ++i) {
+                    if (mHandles[i] == handle) {
+                        pb.sourceId = mConnected[i].client;
+                        break;
+                    }
+                }
+                mPadButtonQueue->push(pb);
+            }
+            return;
+        }
+    }
+
     if (mQueue != nullptr) mQueue->push(m);
 
     // Program Change additionally feeds a controller driver's mode-switch
@@ -269,13 +293,16 @@ std::vector<MidiSource> MidiInput::listSources() {
 }
 
 void MidiInput::start(MidiQueue *queue, SysExQueue *sysexQueue,
-                      ProgramChangeQueue *programChangeQueue) {
+                      ProgramChangeQueue *programChangeQueue,
+                      const PadFilter *padFilter, PadButtonQueue *padButtonQueue) {
     if (mHandles.empty() || mRunning.load()) return;
 
     // Publish the queues before the callbacks can fire.
     mQueue = queue;
     mSysExQueue = sysexQueue;
     mProgramChangeQueue = programChangeQueue;
+    mPadFilter = padFilter;
+    mPadButtonQueue = padButtonQueue;
     mRunning.store(true);
     for (void *handle : mHandles) {
         postSysExBuffers(static_cast<HMIDIIN>(handle), mSysExHeaders, mSysExHeaderOwners);

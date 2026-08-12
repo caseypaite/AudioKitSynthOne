@@ -19,7 +19,7 @@ as expected.
 
 | Controller | Driver name | What it does |
 | --- | --- | --- |
-| Akai MPK Mini mk3 | `akai-mpk-mini-mk3` | Maps the 8 knobs to synth parameters across 4 switchable modes (32 parameters reachable in total -- see [Switching modes](#switching-modes)). Pads and keys play notes normally, no special handling. |
+| Akai MPK Mini mk3 | `akai-mpk-mini-mk3` | Maps the 8 knobs to synth parameters across 4 switchable modes (32 parameters reachable in total -- see [Switching modes](#switching-modes)). The keybed and 8 of the 16 pads play notes normally; the other 8 pads are dedicated transport/panel buttons -- see [Function pads](#function-pads). |
 
 Don't see your controller? It still works as a plain MIDI keyboard/controller
 -- see [Using it with an unsupported controller](#using-it-with-an-unsupported-controller)
@@ -72,16 +72,67 @@ have picked (mostly useful for testing):
    volume respectively. You don't need to touch anything on the device
    itself; whatever program/CC assignment it's already using is read and
    used as-is.
-3. **The 16 pads and the keybed play notes**, exactly like any other MIDI
-   keyboard. There's nothing pad-specific to configure.
+3. **The keybed and 8 of the 16 pads play notes**, exactly like any other
+   MIDI keyboard. The other 8 pads are claimed as dedicated buttons instead
+   -- see [Function pads](#function-pads) below.
 4. **If the query never completes** -- no output port could be paired with
    the input, or the device doesn't reply -- the knobs simply do nothing
    until you bind them yourself with MIDI Learn (see below). Nothing guesses
    at a mapping; a wrong guess risks reassigning a knob to something that
    collides with a universal MIDI convention (e.g. the mod wheel is always
    CC 1), so the driver would rather do nothing than do something wrong.
+   (Function pads are unaffected by this -- pad discovery is a separate part
+   of the same query and doesn't depend on the knobs resolving.)
 5. **Switching the device's onboard program re-runs the same discovery** for
-   a different set of 8 targets -- see [Switching modes](#switching-modes).
+   a different set of 8 knob targets -- see [Switching modes](#switching-modes)
+   -- and re-confirms the function pads too, on every program slot, not just
+   the ones with a designed knob mode.
+
+## Function pads
+
+![Akai MPK Mini mk3 with pads, knobs and keys annotated](images/mpk-mini-mk3-annotated.png)
+
+8 of the 16 pads stop playing notes and become dedicated buttons instead:
+pressing one of these never sounds a note, on any mode or program slot.
+
+**Top row (PAD5-8): transport.** The closest things Synth One has to
+transport controls, since it has no play/stop/record:
+
+| Pad | Function |
+| --- | --- |
+| PAD5 | Panic -- immediately silences every voice |
+| PAD6 | All notes off |
+| PAD7 | Arp/Seq on/off |
+| PAD8 | Switch between Arp mode and Sequencer mode |
+
+**Bottom row (PAD1-4): panel switching.** GUI only (`synthone-gui`) --
+jumps straight to a panel instead of swiping through them:
+
+| Pad | Panel |
+| --- | --- |
+| PAD1 | MAIN (Generators) |
+| PAD2 | ENV (Envelopes) |
+| PAD3 | FX (Effects) |
+| PAD4 | SEQ (Sequencer) |
+
+On the headless `synthone` host (no GUI, no panels), the bottom row still
+stops those 4 pads from playing notes, it just has nothing to switch --
+there's no panel to jump to.
+
+These 8 pads are rediscovered every time you switch the device's onboard
+program with PROG SELECT (see [Switching modes](#switching-modes)), so they
+keep working the same way across every mode, including the 5 undesigned
+slots (4-8) where the knobs go unbound.
+
+The remaining 8 pads (PAD9-16, or however your unit numbers them) are
+unclaimed and continue to play notes normally.
+
+**Which physical pad is which is an assumption, not a confirmed fact** --
+this project doesn't have a physical MPK Mini mk3 to test the pad table's
+byte order against the silkscreen. If the two rows turn out to be swapped
+on your unit, the functions above still work, just on the opposite row --
+nothing will misbehave or leak a note through. If you notice this, it's
+useful to report.
 
 ## Switching modes
 
@@ -209,6 +260,16 @@ against real hardware -- see the developer guide), or you're on a slot
 without a designed mode (only 0-3 have one). Try slot 0 first to confirm
 the driver itself is working, then try 1-3. As always, MIDI Learn works
 regardless of mode switching.
+
+**A pad plays a note instead of doing its function, or the wrong pad does
+the wrong thing.** Function pads are only claimed once the driver's startup
+SysEx query completes -- if that never happens (see the "SysEx TX
+unavailable" and "Knobs don't respond" entries above; pad discovery shares
+the same query as the knobs), all 16 pads fall back to playing notes
+normally, since nothing claims them. If pads *are* claimed but the two rows
+seem swapped, that's the unverified table-order assumption described in
+[Function pads](#function-pads) above, not a bug to work around -- MIDI
+Learn doesn't apply here since these pads never reach the note path at all.
 
 **No hotplug.** Controllers are matched once at startup against whatever's
 already connected when `synthone`/`synthone-gui` starts. Plugging a

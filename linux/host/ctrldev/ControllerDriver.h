@@ -19,12 +19,31 @@
 #include <string>
 #include <vector>
 
+#include "PadFilter.h"
+
 namespace s1 {
 
 class Engine;
 class MidiOutput;
 
 namespace ctrldev {
+
+/// Which physical row a claimed function pad belongs to, reported by a
+/// driver's onPadButton() -- never a raw note number, so device detail
+/// (which note, which SysEx table index) stays inside the driver.
+enum class PadRow { Bottom, Top };
+
+/// What onPadButton() hands back when a pad press means something outside
+/// this driver's own reach -- currently: bottom-row panel selection, a
+/// GUI-only concern this driver (and host/ctrldev/ generally) has no
+/// business knowing about. `reported` false (the default) means "handled
+/// internally, nothing more to do" -- e.g. a top-row transport pad, which a
+/// driver acts on directly through the Engine& given to init().
+struct PadReport {
+    bool   reported = false;
+    PadRow row = PadRow::Bottom;
+    int    index = 0; // 0-3
+};
 
 class ControllerDriver {
 public:
@@ -47,8 +66,13 @@ public:
     /// (default off): permission to write configuration to the device, not
     /// just read from it -- a driver whose write support is unverified
     /// against real hardware should gate any such write behind this rather
-    /// than firing it unconditionally at every startup.
-    virtual void init(Engine &engine, MidiOutput *midiOut, bool allowConfigure) = 0;
+    /// than firing it unconditionally at every startup. `padFilter` is
+    /// where a driver claims (channel, note) pairs it wants to repurpose as
+    /// function pads (see PadFilter.h) -- claiming is what actually stops
+    /// them from playing notes, by diverting them before the MIDI reader
+    /// thread ever pushes them onto the note/CC queue.
+    virtual void init(Engine &engine, MidiOutput *midiOut, bool allowConfigure,
+                      PadFilter &padFilter) = 0;
 
     /// A complete SysEx message addressed to this device's input arrived.
     /// Default: ignore.
@@ -61,6 +85,21 @@ public:
     /// re-seeding Engine's device-default CC map for the new mode's targets
     /// (see Engine::clearDeviceDefaults/setDeviceDefaultCc). Default: ignore.
     virtual void onProgramChange(int program) { (void)program; }
+
+    /// A note-on/off arrived on (channel, note) that this driver had
+    /// claimed as a function pad via `padFilter` in init() -- already
+    /// diverted before it could reach Engine::handleMidi. A driver resolves
+    /// the raw note back to a semantic pad itself (only it knows its own
+    /// note table) and handles what it can internally (e.g. a top-row
+    /// transport pad, via its own Engine&), returning an unreported
+    /// PadReport. For anything it can't act on itself (e.g. a bottom-row
+    /// panel-select pad -- this driver has no GUI/UiState access), it
+    /// returns a reported PadReport for ControllerDriverManager to forward
+    /// to whatever observer the host registered. Default: ignore.
+    virtual PadReport onPadButton(int channel, int note, bool isDown) {
+        (void)channel; (void)note; (void)isDown;
+        return {};
+    }
 };
 
 } // namespace ctrldev

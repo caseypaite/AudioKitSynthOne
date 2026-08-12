@@ -330,6 +330,8 @@ int main(int argc, char **argv) {
     s1::MidiQueue midiQueue;
     s1::SysExQueue sysexQueue;
     s1::ProgramChangeQueue programChangeQueue;
+    s1::PadFilter padFilter;
+    s1::PadButtonQueue padButtonQueue;
     s1::MidiInput midi;
     std::string midiStatus;
     if (!midi.open("SynthOne", error)) {
@@ -342,14 +344,18 @@ int main(int argc, char **argv) {
             midiStatus = midi.portName() +
                          (midiSpec == "all" ? " <- all sources" : " <- " + midiSpec);
         }
-        midi.start(&midiQueue, &sysexQueue, &programChangeQueue);
+        midi.start(&midiQueue, &sysexQueue, &programChangeQueue, &padFilter, &padButtonQueue);
     }
 
+    // No panel-select observer registered here -- the headless CLI has no
+    // panels, so a driver's bottom-row PadReport is simply never forwarded
+    // anywhere; top-row transport pads still work, since a driver handles
+    // those internally via Engine&.
     s1::ctrldev::ControllerDriverManager driverManager;
     std::string driverStatus = "off";
     if (controllerDriverSpec != "off") {
         driverManager.load(controllerDriverSpec, engine, midi.connectedSources(),
-                           controllerDriverConfigure, driverStatus);
+                           controllerDriverConfigure, padFilter, driverStatus);
     }
 
     s1::MidiOutput midiOut;
@@ -449,6 +455,9 @@ int main(int argc, char **argv) {
 
         s1::ProgramChangeMessage pcMsg;
         while (programChangeQueue.pop(pcMsg)) driverManager.dispatchProgramChange(pcMsg);
+
+        s1::PadButtonMessage padMsg;
+        while (padButtonQueue.pop(padMsg)) driverManager.dispatchPadButton(padMsg);
 
         if (testNote >= 0) {
             // 1 s on, 0.5 s off, at the 50 ms tick below.

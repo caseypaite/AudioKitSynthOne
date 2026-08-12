@@ -448,12 +448,14 @@ int main(int argc, char **argv) {
     s1::MidiQueue midiQueue;
     s1::SysExQueue sysexQueue;
     s1::ProgramChangeQueue programChangeQueue;
+    s1::PadFilter padFilter;
+    s1::PadButtonQueue padButtonQueue;
     s1::MidiInput midi;
     std::string midiStatus = "unavailable";
     if (midi.open("SynthOne", error)) {
         std::string ignored;
         midi.connect(midiSpec, ignored);
-        midi.start(&midiQueue, &sysexQueue, &programChangeQueue);
+        midi.start(&midiQueue, &sysexQueue, &programChangeQueue, &padFilter, &padButtonQueue);
         midiStatus = midi.portName();
     }
 
@@ -464,10 +466,26 @@ int main(int argc, char **argv) {
     }
 
     s1::ctrldev::ControllerDriverManager driverManager;
+    // A driver's bottom-row pad presses arrive as a semantic (row, index),
+    // never a raw note -- device detail stays inside the driver. This is
+    // the one place that meaning gets attached: direct-select 4 of the 6
+    // panels, the same UiState field panelTabs() already mutates on a
+    // mouse click, so this reuses an already-correct mechanism rather than
+    // inventing a new one.
+    driverManager.setPadButtonObserver([&ui](s1::ctrldev::PadRow row, int index, bool isDown) {
+        if (row != s1::ctrldev::PadRow::Bottom || !isDown) return;
+        static constexpr s1gui::Panel kBottomRowPanels[4] = {
+            s1gui::Panel::Generators, s1gui::Panel::Envelopes,
+            s1gui::Panel::Effects, s1gui::Panel::Sequencer,
+        };
+        if (index < 0 || index >= 4) return;
+        ui.topPanel = kBottomRowPanels[index];
+        ui.notify(std::string("panel: ") + s1gui::PanelName(ui.topPanel));
+    });
     if (controllerDriverSpec != "off") {
         std::string driverStatus;
         if (driverManager.load(controllerDriverSpec, engine, midi.connectedSources(),
-                               controllerDriverConfigure, driverStatus)) {
+                               controllerDriverConfigure, padFilter, driverStatus)) {
             std::printf("controller driver: %s\n", driverStatus.c_str());
         }
     }
@@ -686,6 +704,9 @@ int main(int argc, char **argv) {
 
         s1::ProgramChangeMessage pcMsg;
         while (programChangeQueue.pop(pcMsg)) driverManager.dispatchProgramChange(pcMsg);
+
+        s1::PadButtonMessage padMsg;
+        while (padButtonQueue.pop(padMsg)) driverManager.dispatchPadButton(padMsg);
 
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
