@@ -21,6 +21,7 @@
 #include "MidiOutput.h"
 #include "AudioBackend.h"
 #include "Engine.h"
+#include "Version.h"
 #include "ctrldev/ControllerDriverManager.h"
 
 #include <algorithm>
@@ -33,10 +34,11 @@ void handleSignal(int) { gRunning.store(false); }
 
 [[noreturn]] void usage() {
     std::cerr <<
-        "AudioKit Synth One (Linux port)\n"
+        "AudioKit Synth One (Linux port) " S1_PORT_VERSION "-" S1_PORT_VERSION_STAGE "\n"
         "\n"
         "usage: synthone [options]\n"
         "\n"
+        "  --version          print the port version, then exit\n"
         "  --backend NAME     audio backend: jack | portaudio (default: first available)\n"
         "  --host-api NAME    PortAudio driver family (wasapi, directsound, mme, alsa...);\n"
         "                     default prefers WASAPI on Windows, the system default elsewhere\n"
@@ -166,7 +168,11 @@ int main(int argc, char **argv) {
             if (i + 1 >= argc) usage();
             return argv[++i];
         };
-        if (arg == "--backend") backendName = next();
+        if (arg == "--version") {
+            std::cout << "AudioKit Synth One (Linux port) " S1_PORT_VERSION "-" S1_PORT_VERSION_STAGE "\n";
+            return 0;
+        }
+        else if (arg == "--backend") backendName = next();
         else if (arg == "--host-api") hostApi = next();
         else if (arg == "--wasapi-exclusive") wasapiExclusive = true;
         else if (arg == "--rate") requestedRate = std::stod(next());
@@ -405,7 +411,8 @@ int main(int argc, char **argv) {
     std::signal(SIGINT, handleSignal);
     std::signal(SIGTERM, handleSignal);
 
-    std::cout << "  [engine]  " << backend->sampleRate() << " Hz / " << backend->bufferFrames()
+    std::cout << "  [version] " << S1_PORT_VERSION "-" S1_PORT_VERSION_STAGE << "\n"
+              << "  [engine]  " << backend->sampleRate() << " Hz / " << backend->bufferFrames()
               << " frames / poly " << engine.polyphony() << "\n"
               << "  [audio]   " << backend->name() << "  " << backend->description() << "\n"
               << "  [midi]    " << midiStatus << "\n";

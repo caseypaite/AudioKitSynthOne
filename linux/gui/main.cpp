@@ -27,6 +27,7 @@
 #include "Json.h"
 #include "Panels.h"
 #include "Widgets.h"
+#include "Version.h"
 #include "ctrldev/ControllerDriverManager.h"
 
 #include <algorithm>
@@ -305,7 +306,11 @@ int main(int argc, char **argv) {
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         auto next = [&]() -> std::string { return (i + 1 < argc) ? argv[++i] : std::string(); };
-        if (arg == "--backend") { backendName = next(); backendGiven = true; }
+        if (arg == "--version") {
+            std::printf("AudioKit Synth One (Linux port, GUI) " S1_PORT_VERSION "-" S1_PORT_VERSION_STAGE "\n");
+            return 0;
+        }
+        else if (arg == "--backend") { backendName = next(); backendGiven = true; }
         else if (arg == "--host-api") hostApi = next();
         else if (arg == "--wasapi-exclusive") wasapiExclusive = true;
         else if (arg == "--device") deviceSpec = next();
@@ -335,7 +340,8 @@ int main(int argc, char **argv) {
         } else if (arg == "--fullscreen") fullscreen = true;
         else if (arg == "--hide-cursor") hideCursor = true;
         else if (arg == "-h" || arg == "--help") {
-            std::printf("usage: synthone-gui [--backend jack|portaudio] [--host-api NAME]\n"
+            std::printf("AudioKit Synth One (Linux port, GUI) " S1_PORT_VERSION "-" S1_PORT_VERSION_STAGE "\n"
+                        "usage: synthone-gui [--backend jack|portaudio] [--host-api NAME]\n"
                         "       [--resources DIR] [--wasapi-exclusive]\n"
                         "                    [--device INDEX|NAME] [--list-devices]\n"
                         "                    [--rate HZ] [--buffer FRAMES]\n"
@@ -346,6 +352,7 @@ int main(int argc, char **argv) {
                         "                    [--top PANEL] [--bottom PANEL]\n"
                         "                    [--fullscreen] [--hide-cursor]\n"
                         "                    [--compact | --no-compact]\n"
+                        "                    [--version]\n"
                         "  PANEL: MAIN ENV PAD FX SEQ TUNE\n"
                         "  compact is chosen automatically on a display under\n"
                         "  1000x620, such as the Raspberry Pi 7\" panel (800x480);\n"
