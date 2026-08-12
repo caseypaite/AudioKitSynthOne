@@ -33,9 +33,10 @@ void check(bool condition, const char *what) {
 int main() {
     s1::Engine engine;
     s1::PadFilter padFilter;
+    s1::CcFilter ccFilter;
     auto driver = s1::ctrldev::makeNovationLaunchpadMini();
 
-    driver->init(engine, /*midiOut=*/nullptr, /*allowConfigure=*/false, padFilter);
+    driver->init(engine, /*midiOut=*/nullptr, /*allowConfigure=*/false, padFilter, ccFilter);
     check(true, "init() with no MidiOutput does not crash");
 
     const int notesToCheck[] = {0, 1, 63, 104, 111, 127};

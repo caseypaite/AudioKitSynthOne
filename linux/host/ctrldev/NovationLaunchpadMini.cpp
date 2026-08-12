@@ -57,11 +57,12 @@ public:
     const char *driverName() const override { return "novation-launchpad-mini"; }
 
     void init(Engine &engine, MidiOutput *midiOut, bool allowConfigure,
-             PadFilter &padFilter) override {
+             PadFilter &padFilter, CcFilter &ccFilter) override {
         (void)engine;
         (void)midiOut;
         (void)allowConfigure;
         (void)padFilter; // nothing to claim -- see the file header
+        (void)ccFilter;  // nothing to claim here either
     }
 };
 

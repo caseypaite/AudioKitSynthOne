@@ -15,6 +15,7 @@
 
 #include "MidiSysEx.h"
 #include "PadFilter.h"
+#include "CcFilter.h"
 
 #include <atomic>
 #include <cstdint>
@@ -104,10 +105,19 @@ public:
     /// -- suppressed from the note/CC path entirely, not just duplicated --
     /// so a controller driver can turn specific pads into function buttons
     /// that no longer sound a note.
+    ///
+    /// `ccFilter`/`ccQueue` are likewise optional, but unlike the pad pair,
+    /// observe-only: a CC whose (channel, cc) is claimed in `ccFilter` (see
+    /// CcFilter.h) is *additionally* pushed to `ccQueue`, still also
+    /// reaching `queue` exactly as it would with no filter at all -- the
+    /// same "duplicate, don't divert" shape ProgramChangeQueue already
+    /// uses, not the pad path's suppression.
     void start(MidiQueue *queue, SysExQueue *sysexQueue = nullptr,
               ProgramChangeQueue *programChangeQueue = nullptr,
               const PadFilter *padFilter = nullptr,
-              PadButtonQueue *padButtonQueue = nullptr);
+              PadButtonQueue *padButtonQueue = nullptr,
+              const CcFilter *ccFilter = nullptr,
+              CcQueue *ccQueue = nullptr);
     void stop();
 
     /// Enumerate readable MIDI sources on the system.
@@ -137,6 +147,8 @@ private:
     ProgramChangeQueue        *mProgramChangeQueue = nullptr;
     const PadFilter           *mPadFilter = nullptr;
     PadButtonQueue            *mPadButtonQueue = nullptr;
+    const CcFilter            *mCcFilter = nullptr;
+    CcQueue                   *mCcQueue = nullptr;
     SysExAssembler             mSysExAssembler;
     std::vector<MidiSource>   mConnected;
     std::atomic<bool>         mRunning{false};

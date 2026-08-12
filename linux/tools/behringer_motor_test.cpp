@@ -35,9 +35,10 @@ int main() {
     s1::Engine engine; // never started -- Engine accessors used here all
                        // guard on mKernel
     s1::PadFilter padFilter;
+    s1::CcFilter ccFilter;
     auto driver = s1::ctrldev::makeBehringerMotor();
 
-    driver->init(engine, /*midiOut=*/nullptr, /*allowConfigure=*/false, padFilter);
+    driver->init(engine, /*midiOut=*/nullptr, /*allowConfigure=*/false, padFilter, ccFilter);
     check(true, "init() with no MidiOutput does not crash");
 
     // -- Fixed CC defaults, no SysEx round trip needed -------------------

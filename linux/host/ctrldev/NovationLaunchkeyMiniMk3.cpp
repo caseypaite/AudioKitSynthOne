@@ -19,18 +19,21 @@
 //  matters to this framework).
 //
 //  The keybed and 16 pads (2 rows of 8) play as plain notes -- no function
-//  pads for this device. Its transport buttons (Play/Record, and Track
-//  Left/Right, Up/Down) are all CC-based with no `onCC()` hook available to
-//  react to them (same reasoning as the Akai MPK249's transport CCs -- see
-//  AkaiMpk249.cpp's file header), so they're left unbound rather than
-//  half-implemented.
+//  pads for this device. Play (CC 0x73) and Record (CC 0x75) ARE claimed via
+//  CcFilter and handled in onCC() -- arp on-off / arp<->sequencer mode --
+//  confirmed by Zynthian's own dispatch to arrive only on channel 15 (0xF),
+//  the same "if chan == 0xf:" gate the knob CCs are read under, so this
+//  driver claims them on that specific channel. Track Left/Right/Up/Down are
+//  also CC-based but have no equivalent Synth One action worth inventing, so
+//  they're left unclaimed.
 //
 //  Protocol facts below are transcribed from Zynthian's shipped driver
 //  (zyngine/ctrldev/zynthian_ctrldev_launchkey_mini_mk3.py on the vangelis
 //  branch of zynthian/zynthian-ui) -- a working reference implementation,
 //  not a guess, but not independently validated against physical hardware
 //  in this project's development environment. Which target parameter each
-//  knob maps to is this driver's own design choice, not a transcribed fact.
+//  knob maps to, and which action Play/Record perform, is this driver's own
+//  design choice, not a transcribed fact.
 //
 
 #include "NovationLaunchkeyMiniMk3.h"
@@ -56,6 +59,11 @@ constexpr S1Parameter kKnobTarget[kKnobCount] = {
     cutoff, resonance, attackDuration, releaseDuration,
     lfo1Rate, reverbMix, delayMix, masterVolume};
 
+// -- Confirmed fixed transport CCs, "session mode" channel 15 only --
+constexpr int kSessionChannel = 15;
+constexpr int kCcPlay   = 0x73;
+constexpr int kCcRecord = 0x75;
+
 class NovationLaunchkeyMiniMk3 : public ControllerDriver {
 public:
     std::vector<std::string> deviceNameHints() const override {
@@ -69,7 +77,8 @@ public:
     const char *driverName() const override { return "novation-launchkey-mini-mk3"; }
 
     void init(Engine &engine, MidiOutput *midiOut, bool allowConfigure,
-             PadFilter &padFilter) override {
+             PadFilter &padFilter, CcFilter &ccFilter) override {
+        mEngine = &engine;
         (void)allowConfigure; // nothing to configure -- fixed CCs, no writable state
         (void)padFilter;      // no function pads for this device -- see the file header
 
@@ -80,7 +89,30 @@ public:
         for (int i = 0; i < kKnobCount; ++i) {
             engine.setDeviceDefaultCc(kKnobCc[i], kKnobTarget[i]);
         }
+
+        ccFilter.claimChannel(kSessionChannel);
+        ccFilter.claimCc(kCcPlay);
+        ccFilter.claimCc(kCcRecord);
     }
+
+    /// The 2 claimed transport CCs, handled entirely internally via Engine&.
+    /// Acts only when the CC value is non-zero, matching Zynthian's own
+    /// button-press convention for these same CCs.
+    void onCC(int channel, int cc, int value) override {
+        (void)channel; // claimed on the confirmed session channel -- see init()
+        if (value <= 0 || mEngine == nullptr) return;
+        if (cc == kCcPlay) {
+            mEngine->setParameter(
+                arpIsOn, mEngine->getParameter(arpIsOn) != 0.0f ? 0.0f : 1.0f);
+        } else if (cc == kCcRecord) {
+            mEngine->setParameter(
+                arpIsSequencer,
+                mEngine->getParameter(arpIsSequencer) != 0.0f ? 0.0f : 1.0f);
+        }
+    }
+
+private:
+    Engine *mEngine = nullptr;
 };
 
 } // namespace

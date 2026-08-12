@@ -32,16 +32,22 @@
 //    with no equivalent in Synth One -- see the developer guide's "Why this
 //    exists" section). There's no honest single-parameter target for "solo
 //    channel 4," so these are left alone entirely rather than invented.
-//  - The 6 TRANSPORT_*_CC constants (Play/Stop/Rec/Rewind/FF/Loop, CCs
-//    114-119): ControllerDriver has no onCC()/onControlChange() hook --
-//    Engine::setDeviceDefaultCc only ever applies a CC's raw 0-127 value
-//    directly to a parameter (see Engine::handleMidi), it can't run the
-//    toggle logic (checking/flipping a boolean via getParameter()) the way
-//    this port's note-based function pads do (see AkaiMpkMiniMk3.cpp's top
-//    row). A momentary transport button bound this way would only ever
-//    *set* a value on press, never toggle it, which doesn't match what a
-//    "Play"/"Stop"/"Record"-labelled button should do on repeated presses --
-//    better left unbound than shipped half-working.
+//  - 3 of the 6 TRANSPORT_*_CC constants (Rewind/Fast-Forward/Loop, CCs
+//    114-116): Zynthian's own use for these (clear/clone/toggle the active
+//    loop sequence) has no Synth One equivalent, unlike Play/Stop/Record
+//    below, which do.
+//
+//  Play/Stop/Record (CCs 118/117/119) ARE claimed via CcFilter and handled
+//  in onCC() -- panic / arp on-off / arp<->sequencer mode, the same
+//  3-function transport mapping this port's Note-based transport buttons
+//  use elsewhere (e.g. the Akai APC drivers). This is the first driver in
+//  this port to make use of `ControllerDriver::onCC()` -- see CcFilter.h and
+//  ControllerDriver.h for how a claimed CC reaches a driver without ever
+//  running driver code on the audio render thread. Confirmed via Zynthian's
+//  own `midi_event()`: these 3 CCs are only interpreted on MIDI channel 0
+//  (`if ch == CTRL_MIDI_CH:`, `CTRL_MIDI_CH = 0`), so this driver claims them
+//  on that specific channel rather than the wildcard default most of this
+//  port's drivers use for an unconfirmed channel.
 //
 //  Bank C has no separate confirmed knob CC list in the source (only its
 //  switch CCs are documented -- see above), so no Bank C knob target set
@@ -52,8 +58,9 @@
 //  editor triggering, a concept with no equivalent in Synth One, the same
 //  reasoning that leaves the switch CCs above unbound.
 //
-//  Which target parameter each fixed CC maps to is this driver's own design
-//  choice, not a transcribed fact -- see the parameter tables below.
+//  Which target parameter each fixed CC maps to, and which action Play/Stop/
+//  Record perform, is this driver's own design choice, not a transcribed
+//  fact -- see the parameter tables and onCC() below.
 //
 
 #include "AkaiMpk249.h"
@@ -94,6 +101,12 @@ constexpr S1Parameter kBankBKnobTarget[kKnobCount] = {
     filterAttackDuration, filterDecayDuration, filterSustainLevel, filterReleaseDuration,
     filterADSRMix, adsrPitchTracking, decayDuration, sustainLevel};
 
+// -- Confirmed fixed transport CCs, channel 0 only (see the file header) --
+constexpr int kTransportChannel = 0;
+constexpr int kCcStop   = 117;
+constexpr int kCcPlay   = 118;
+constexpr int kCcRecord = 119;
+
 class AkaiMpk249 : public ControllerDriver {
 public:
     std::vector<std::string> deviceNameHints() const override {
@@ -110,7 +123,8 @@ public:
     const char *driverName() const override { return "akai-mpk249"; }
 
     void init(Engine &engine, MidiOutput *midiOut, bool allowConfigure,
-             PadFilter &padFilter) override {
+             PadFilter &padFilter, CcFilter &ccFilter) override {
+        mEngine = &engine;
         (void)midiOut;       // no SysEx TX needed -- see the file header
         (void)allowConfigure; // nothing to configure -- fixed CCs, no writable state
         (void)padFilter;      // no function pads for this device -- see the file header
@@ -120,7 +134,37 @@ public:
             engine.setDeviceDefaultCc(kFaderCc[i], kFaderTarget[i]);
             engine.setDeviceDefaultCc(kBankBKnobCc[i], kBankBKnobTarget[i]);
         }
+
+        ccFilter.claimChannel(kTransportChannel);
+        ccFilter.claimCc(kCcStop);
+        ccFilter.claimCc(kCcPlay);
+        ccFilter.claimCc(kCcRecord);
     }
+
+    /// The 3 claimed transport CCs, handled entirely internally via Engine&
+    /// -- mirrors the Akai APC drivers' Note-based transport buttons, just
+    /// reached via onCC() instead of onPadButton(). Acts only when the CC
+    /// value is non-zero, matching Zynthian's own `ccval > 0` press check
+    /// for these same 3 CCs -- a release, if this device sends one at all,
+    /// is not confirmed to send 0, so triggering on "any non-zero value"
+    /// rather than a specific one is the safer read.
+    void onCC(int channel, int cc, int value) override {
+        (void)channel; // claimed on the confirmed transport channel -- see init()
+        if (value <= 0 || mEngine == nullptr) return;
+        if (cc == kCcStop) {
+            mEngine->panic();
+        } else if (cc == kCcPlay) {
+            mEngine->setParameter(
+                arpIsOn, mEngine->getParameter(arpIsOn) != 0.0f ? 0.0f : 1.0f);
+        } else if (cc == kCcRecord) {
+            mEngine->setParameter(
+                arpIsSequencer,
+                mEngine->getParameter(arpIsSequencer) != 0.0f ? 0.0f : 1.0f);
+        }
+    }
+
+private:
+    Engine *mEngine = nullptr;
 };
 
 } // namespace

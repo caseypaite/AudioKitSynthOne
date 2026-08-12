@@ -315,6 +315,85 @@ wherever it discovers its pad table (for `AkaiMpkMiniMk3`, that's
 `parsePads()`, run from `onSysEx()`); a driver that doesn't want it simply
 never touches the reference.
 
+## CC transport (`host/CcFilter.h`)
+
+Some devices' transport/mode buttons are Control Change messages, not
+Notes -- the Akai MPK249's Play/Stop/Record, every Novation Launchkey's
+Play/Record, the Korg nanoKONTROL2's entire button surface (it has no Notes
+at all), the Teenage Engineering OP-1's REC/PLAY. `PadFilter`/`onPadButton()`
+can't reach any of these -- it only ever intercepts Notes. `CcFilter` and
+`ControllerDriver::onCC()` are the CC-message counterpart, added once this
+gap had blocked real functionality on enough drivers to be worth closing
+(see "Known gaps" below for the history).
+
+**Deliberately not shaped like `PadFilter`: no suppression.** A claimed CC
+still reaches `MidiQueue` and `Engine::handleMidi()` exactly as it would
+with no filter at all -- `CcFilter` only *additionally* pushes a copy to
+`CcQueue`, the same "duplicate, don't divert" shape `ProgramChangeQueue`
+already uses. This is safe specifically because a driver that claims a CC
+via `CcFilter` never also binds that same CC through
+`Engine::setDeviceDefaultCc()` -- there would be nothing meaningful to bind
+a transport button's raw 0-127 value to, so the two mechanisms never
+target the same CC number and never conflict. Contrast with `PadFilter`:
+suppression is required there because an unclaimed Note would audibly
+sound a pitch, a hazard CC has no equivalent of.
+
+Two pieces, both in `host/CcFilter.h`, header-only, platform-independent,
+the same publish/consult shape as `PadFilter`:
+
+- **`CcFilter`** -- a 128-bit claimed-CC table (`std::atomic<uint32_t>
+  mCcBits[4]`) plus an optional claimed channel, identical structure to
+  `PadFilter`'s note table. A driver (control thread) calls
+  `claimCc()`/`unclaimCc()`/`claimChannel()`/`clear()`. The MIDI reader
+  thread calls `isClaimedCc(channel, cc)` -- acquire loads, wait-free, no
+  locks, no allocation on either side.
+- **`CcMessage`/`CcQueue`** -- structurally identical to
+  `PadButtonMessage`/`PadButtonQueue` (SPSC ring, capacity 16), carrying
+  `{channel, cc, value, sourceId}` from the reader thread to the control
+  thread.
+
+Reader-thread wiring mirrors the Program Change path, not the pad-note
+path: right where a CC is already decoded (about to be pushed to
+`MidiQueue` regardless), an *additional* check runs `CcFilter::isClaimedCc()`
+and, if claimed, pushes a copy to `CcQueue` -- the existing push onto
+`MidiQueue` is untouched.
+
+- ALSA: `run()`'s `SND_SEQ_EVENT_CONTROLLER` case pushes to `CcQueue` when
+  claimed, alongside its existing `MidiQueue` push.
+- WinMM: `enqueuePacked()`'s `kind == 0xB0` branch does the same, resolving
+  `sourceId` the same way the Program Change path does.
+
+`MidiInput::start()` gained two more optional trailing parameters,
+`const CcFilter *ccFilter` and `CcQueue *ccQueue`, both defaulting to
+`nullptr` (no extra dispatch, matching pre-existing behaviour) for a driver
+that has no use for this path.
+
+### The driver side: `onCC()`
+
+```cpp
+virtual void onCC(int channel, int cc, int value) {}
+```
+
+Delivered on the control thread via
+`ControllerDriverManager::dispatchCc(msg)` (mirrors `dispatchSysEx`/
+`dispatchProgramChange`/`dispatchPadButton`: routes to the loaded driver
+whose `inputSourceId` matches `msg.sourceId`, falling back to offering it
+to every loaded driver if unmatched). A driver claims a CC via `ccFilter`
+in `init()` (a fifth parameter, alongside `padFilter`) and reacts entirely
+through its own `Engine&` -- there's no equivalent of `PadReport`'s
+"report outward to a GUI observer" path, since every driver that uses
+`onCC()` so far only needs actions `Engine&` alone can perform (panic,
+toggle a parameter). `value` is the raw 0-127 CC value; check it against 0
+explicitly rather than assuming a momentary button always sends a release
+-- several of this port's onCC() implementations only confirmed a non-zero
+value on press, never a specific release value.
+
+`AkaiMpk249.cpp` was the first driver in this port to use `onCC()` --
+Play/Stop/Record, claimed on the one channel Zynthian's own driver confirms
+they arrive on. See its file header for the fuller worked example, and the
+Novation Launchkey/Korg nanoKONTROL2/Teenage Engineering OP-1 drivers for
+more.
+
 ## The driver interface (`host/ctrldev/ControllerDriver.h`)
 
 ```cpp
@@ -322,10 +401,12 @@ class ControllerDriver {
 public:
     virtual std::vector<std::string> deviceNameHints() const = 0;
     virtual const char *driverName() const = 0;
-    virtual void init(Engine &engine, MidiOutput *midiOut, bool allowConfigure, PadFilter &padFilter) = 0;
+    virtual void init(Engine &engine, MidiOutput *midiOut, bool allowConfigure,
+                      PadFilter &padFilter, CcFilter &ccFilter) = 0;
     virtual void onSysEx(const uint8_t *data, size_t length) {}
     virtual void onProgramChange(int program) {}
     virtual PadReport onPadButton(int channel, int note, bool isDown) { return {}; }
+    virtual void onCC(int channel, int cc, int value) {}
 };
 ```
 
@@ -333,18 +414,20 @@ public:
   `MidiSource::name`. A device is claimed if its name contains *any* one of
   them. Keep this list generous: the same physical device can report subtly
   different names across ALSA/WinMM/firmware revisions.
-- **`init(engine, midiOut, allowConfigure, padFilter)`** -- called once,
-  after the manager has matched a device and tried to pair a same-device
-  output. `midiOut` is `nullptr` when no output was found; `init()` must
-  still work as a plain input in that case (skip anything needing SysEx
-  TX). `midiOut` is a private `MidiOutput` the manager owns and connected
-  itself -- independent of any `--midi-out` the user also configured, so
-  the two never fight over one `MidiOutput`'s connection state.
-  `allowConfigure` reflects `--controller-driver-configure` (default off):
-  permission to *write* to the device, not just read from it -- gate any
-  such write behind this rather than firing it unconditionally. `padFilter`
-  is the driver's handle for claiming function pads -- see "Pad-button
-  transport" above; a driver with no function pads never touches it.
+- **`init(engine, midiOut, allowConfigure, padFilter, ccFilter)`** -- called
+  once, after the manager has matched a device and tried to pair a
+  same-device output. `midiOut` is `nullptr` when no output was found;
+  `init()` must still work as a plain input in that case (skip anything
+  needing SysEx TX). `midiOut` is a private `MidiOutput` the manager owns
+  and connected itself -- independent of any `--midi-out` the user also
+  configured, so the two never fight over one `MidiOutput`'s connection
+  state. `allowConfigure` reflects `--controller-driver-configure` (default
+  off): permission to *write* to the device, not just read from it -- gate
+  any such write behind this rather than firing it unconditionally.
+  `padFilter` is the driver's handle for claiming function pads -- see
+  "Pad-button transport" above. `ccFilter` is the driver's handle for
+  claiming CC-based transport/mode buttons -- see "CC transport" above. A
+  driver that needs neither never touches the corresponding reference.
 - **`onSysEx(data, length)`** -- a complete, reassembled message addressed
   to this driver's device. Default implementation ignores it.
 - **`onProgramChange(program)`** -- a Program Change addressed to this
@@ -353,19 +436,28 @@ public:
 - **`onPadButton(channel, note, isDown)`** -- a note claimed via
   `padFilter.claimNote()` fired, diverted before it could reach `MidiQueue`.
   Default implementation reports nothing. See "Pad-button transport" above.
+- **`onCC(channel, cc, value)`** -- a CC claimed via `ccFilter.claimCc()`
+  arrived, delivered in addition to (not instead of) the ordinary
+  `MidiQueue` path. Default implementation ignores it. See "CC transport"
+  above.
 
 ## The manager (`host/ctrldev/ControllerDriverManager`)
 
-A small static registration table, deliberately not a plugin system:
+A small static registration table, deliberately not a plugin system --
+20+ drivers as of this writing, one entry per device (see
+`ControllerDriverManager.cpp` for the current, authoritative list rather
+than duplicating it here, since it changes more often than this doc does):
 
 ```cpp
 // ControllerDriverManager.cpp
 const Entry kDrivers[] = {
     {"akai-mpk-mini-mk3", makeAkaiMpkMiniMk3},
+    {"akai-midimix", makeAkaiMidiMix},
+    // ... one entry per supported device
 };
 ```
 
-`load(wantedName, engine, connectedInputs, allowConfigure, padFilter, status)`:
+`load(wantedName, engine, connectedInputs, allowConfigure, padFilter, ccFilter, status)`:
 
 1. `wantedName == "off"` -> does nothing, returns `false`.
 2. For each registered driver where `wantedName == "auto"` or matches its
@@ -384,13 +476,14 @@ const Entry kDrivers[] = {
    status line; `gui/main.cpp` prints it once at startup if something
    loaded.
 
-`dispatchSysEx(msg)`/`dispatchProgramChange(msg)`/`dispatchPadButton(msg)`
-route a message to the loaded driver whose `inputSourceId` matches
-`msg.sourceId`; if nothing matches (unset source id, or a startup race),
-it's offered to every loaded driver rather than dropped.
-`dispatchPadButton()` additionally forwards a `reported` result to the
-observer registered via `setPadButtonObserver()` -- see "Pad-button
-transport" above.
+`dispatchSysEx(msg)`/`dispatchProgramChange(msg)`/`dispatchPadButton(msg)`/
+`dispatchCc(msg)` route a message to the loaded driver whose
+`inputSourceId` matches `msg.sourceId`; if nothing matches (unset source
+id, or a startup race), it's offered to every loaded driver rather than
+dropped. `dispatchPadButton()` additionally forwards a `reported` result to
+the observer registered via `setPadButtonObserver()` -- see "Pad-button
+transport" above. `dispatchCc()` has no equivalent observer-forwarding
+step -- see "CC transport" above for why.
 
 `Loaded` (the manager's internal per-driver record) stores its `MidiOutput`
 by value inside a `std::vector<std::unique_ptr<Loaded>>`, not
@@ -591,7 +684,11 @@ default to matching on any channel, which degrades safely either way.
    the device has dedicated function pads that should stop playing notes
    and do something else instead, see "Pad-button transport" and "Function
    pads" above -- claim them via the `padFilter` passed into `init()` and
-   implement `onPadButton()`.
+   implement `onPadButton()`. If instead the device's transport/mode
+   buttons are Control Change rather than Note (common -- check the
+   reference source's `midi_event()` for whether it has a note-on/off
+   branch at all), see "CC transport" above -- claim them via `ccFilter`
+   and implement `onCC()`.
 6. **Don't guess at CC numbers you haven't confirmed.** CC 1 (mod wheel)
    and CC 64 (sustain) are universal MIDI conventions; seeding a device
    default onto one of those hijacks it for anyone who also uses that
@@ -730,7 +827,15 @@ the full citation and design rationale; this table is a quick index.
 | `AkaiApcKey25.cpp` | `akai-apc-key25` | No | 3 (STOP ALL CLIPS/PLAY/RECORD -> panic/arp on-off/arp\<->seq) | Device-name hints are exact strings, not a bare "APC Key 25" substring, to avoid claiming mk2 hardware |
 | `AkaiApcKey25Mk2.cpp` | `akai-apc-key25-mk2` | No | Same 3, same notes as gen 1 | Shares gen 1's fixed knob CCs and transport notes byte-for-byte per Zynthian's own source |
 | `AkaiApc40Mk2.cpp` | `akai-apc40-mk2` | No | Same 3 transport notes as APC Key 25 | TRACK FADER shares one CC across all 8 physical faders (channel distinguishes which -- `Engine::mDeviceDefaultCc` is channel-blind, so only one target is bindable, not 8); TEMPO KNOB and CUE LEVEL deliberately unbound (relative/ambiguous per Akai's own doc) |
-| `AkaiMpk249.cpp` | `akai-mpk249` | No | None | **Requires the device's onboard preset #25 ("MPK Generic")** -- the CCs below only apply on that preset; 24 BANK A/B/C switch CCs and 6 TRANSPORT_\*\_CC constants are confirmed but deliberately unbound (see the file header: no per-channel-strip concept in Synth One, and no toggle-capable hook for a momentary CC) |
+| `AkaiMpk249.cpp` | `akai-mpk249` | No | None (Play/Stop/Record claimed via **CC transport** instead -- see below) | **Requires the device's onboard preset #25 ("MPK Generic")** -- the CCs below only apply on that preset; 24 BANK A/B/C switch CCs and 3 of the 6 TRANSPORT_\*\_CC constants (Rewind/FF/Loop) are confirmed but deliberately unbound (no per-channel-strip concept in Synth One for the former; no Synth One equivalent action for the latter) |
+
+The "Function pads" column above is Note-based only. `AkaiMpk249.cpp` is
+also this port's first user of **CC transport** (`host/CcFilter.h` /
+`ControllerDriver::onCC()` -- see the developer guide's dedicated section):
+its Play/Stop/Record are CCs, not Notes, so `PadFilter` can't reach them --
+claimed via `ccFilter` instead, on the one MIDI channel Zynthian's own
+driver confirms they arrive on, mapped to the same panic / arp on-off /
+arp<->sequencer mode this port's Note-based transport buttons use.
 
 None of the five claims the device's clip-launch grid, keybed, or generic
 pads as function pads -- only genuinely dedicated, single-purpose transport
@@ -811,11 +916,20 @@ establish an absolute fallback exists to use instead).
 **Only two Launchkey CC ranges are richer than an 8-knob row.** The Launchkey
 MK3 88 additionally has 8 sliders (CC 53-60) and a master slider (CC 61),
 all confirmed absolute the same way; every other Launchkey in this port has
-only the one knob row. None of the Launchkey family's transport (Play/
-Record), navigation, or per-channel chain buttons are bound -- they're all
-CC-based, and `ControllerDriver` has no `onCC()`/`onControlChange()` hook (see
-`AkaiMpk249.cpp`'s file header for the fuller explanation of this limitation,
-first documented there).
+only the one knob row.
+
+**All four Launchkeys claim Play/Record via CC transport.** Play (CC 0x73)
+and Record (CC 0x75) are claimed via `ccFilter` and handled in `onCC()` on
+every Launchkey driver -- arp on-off / arp<->sequencer mode, the 2-function
+subset of this port's transport-button vocabulary these devices have a
+CC for. The Mini mk3 and MK3 88 confirm these two arrive only on the same
+channel-15 "session mode" gate their knob CCs are read under
+(`ccFilter.claimChannel(15)`); Zynthian's own dispatch never gates them by
+channel on the MK4 37 or Mini MK4 37, so those two claim on the wildcard
+default instead. Navigation and per-channel chain buttons remain unbound --
+CC-based too, but with no equivalent Synth One action worth inventing (the
+per-channel ones are a Zynthian chain-mixer concept, the same reasoning
+that leaves the Akai MPK249's 24 switch CCs unbound).
 
 **Most Launchpads bind nothing at all, and that's the confirmed, correct
 scope, not a research gap.** `NovationLaunchpadMini.cpp` (mk1) has no knobs,
@@ -824,7 +938,11 @@ buttons are Session/User1/User2/Mixer/arrow-key labels on real hardware,
 with no honest Synth One mapping. `NovationLaunchpadX.cpp`,
 `NovationLaunchpadMiniMk3.cpp`, and `NovationLaunchpadProMk3.cpp` are
 structurally identical to each other: an 8x8 grid, a DAW-mode SysEx
-handshake, and 4 CC-based arrow buttons with no `onCC()` hook to act on.
+handshake, and 4 CC-based arrow buttons. `onCC()` (see "CC transport"
+above) could technically claim these now, but "jump the cursor" has no
+honest Synth One action to map to -- unlike Play/Record elsewhere in this
+port, arrow keys aren't a transport concept this synth has any equivalent
+of, so they stay unbound on purpose, not for lack of a mechanism.
 **These three deliberately don't send the DAW-mode handshake at all**, unlike
 every other mode-entry handshake in this port -- per Zynthian's own driver,
 entering that mode switches the grid away from its alternate "Keys"
@@ -853,30 +971,36 @@ established.
 
 ## The Korg nanoKONTROL2 driver
 
-`KorgNanoKontrol2.cpp` is the simplest driver in this port: no SysEx, no
-mode-entry handshake of any kind (unlike every Akai/Arturia/Novation driver
-above), and no function pads. It's also the only device so far whose
-confirmed protocol facts required *not* binding something the developer
-guide's rule would otherwise allow: fader 2 sits at CC1, which collides with
-the universal MIDI mod wheel convention. This isn't a guessed CC (Zynthian's
-own `faders_ccnum = [0, 1, 2, 3, 4, 5, 6, 7]` confirms it), but binding it
-anyway would create exactly the hazard step 6 of "Adding a driver" above
-warns about -- a user's mod wheel, on a different, simultaneously-connected
-keyboard, silently driving whatever this driver bound to fader 2. Fader 2 is
-skipped; the other 7 faders and all 8 knobs (CC16-23) are bound normally.
-Worth remembering for any future driver: a real device can hand you this
-same hazard through a confirmed fact, not just a guess -- treat both the
-same way.
+`KorgNanoKontrol2.cpp` has no SysEx and no mode-entry handshake of any kind
+(unlike every Akai/Arturia/Novation driver above). It's also the only
+device so far whose confirmed protocol facts required *not* binding
+something the developer guide's rule would otherwise allow: fader 2 sits at
+CC1, which collides with the universal MIDI mod wheel convention. This
+isn't a guessed CC (Zynthian's own `faders_ccnum = [0, 1, 2, 3, 4, 5, 6, 7]`
+confirms it), but binding it anyway would create exactly the hazard step 6
+of "Adding a driver" above warns about -- a user's mod wheel, on a
+different, simultaneously-connected keyboard, silently driving whatever
+this driver bound to fader 2. Fader 2 is skipped; the other 7 faders and
+all 8 knobs (CC16-23) are bound normally. Worth remembering for any future
+driver: a real device can hand you this same hazard through a confirmed
+fact, not just a guess -- treat both the same way.
 
 This device also has **no note-based controls at all** -- Zynthian's own
-`midi_event()` has no note-on/off branch for it, only Control Change. Every
-button (SOLO/MUTE/REC x8, transport Play/Stop/Record/Rewind/Fast-Forward/
-Cycle, track/marker navigation) is therefore ineligible for the
-`PadFilter`/`onPadButton()` function-pad mechanism, which only ever
-intercepts Notes -- the same CC-vs-Note distinction first documented in
-`AkaiMpk249.cpp`'s file header, just total here rather than partial. None of
-them are bound. `tools/korg_nanokontrol2_test.cpp` follows the same
-synthetic-data shape as `akai_midimix_test.cpp`.
+`midi_event()` has no note-on/off branch for it, only Control Change, so
+`PadFilter`/`onPadButton()` (Note-only) can't reach any of its buttons.
+Play (CC 41), Stop (CC 42) and Record (CC 45) ARE claimed via `ccFilter`
+and handled in `onCC()` -- panic / arp on-off / arp<->sequencer mode, the
+same 3-function transport mapping this port's Note-based transport buttons
+use elsewhere. Channel is unconfirmed for the input side (Zynthian's own
+`midi_event()` never checks one for any CC on this device), so the claim
+uses the wildcard default. The remaining 24 SOLO/MUTE/REC buttons and the
+track/marker navigation buttons stay unbound even though `onCC()` could
+technically reach them: Zynthian's own driver treats them as per-mixer-
+channel state (7 strips + master), the same Zynthian chain-mixer concept
+with no Synth One equivalent that leaves the Akai MPK249's 24 switch CCs
+unbound too. `tools/korg_nanokontrol2_test.cpp` follows the same
+synthetic-data shape as `akai_midimix_test.cpp`, plus `onCC()` checks
+mirroring `akai_mpk249_test.cpp`'s.
 
 ## Remaining-vendor drivers: Behringer, WORLDE, Teenage Engineering
 
@@ -907,12 +1031,15 @@ confirmed channel with no handshake required -- 4 are claimed as function
 pads, the same 4-function transport mapping the Akai MPK Mini mk3's own top
 row established.
 
-**`TeenageEngineeringOp1.cpp`** (Teenage Engineering OP-1, MIDI Mode) is a
-recognition-only stub, and that's the confirmed, correct scope: its 4
-encoders are confirmed relative (the same two's-complement-style delta the
-Novation Launchkey Mini mk4 37's encoders use), and every other control --
-transport, mode buttons, arrows, everything -- is CC-based with no
-`onCC()` hook to act on, the limitation `AkaiMpk249.cpp` first documented.
+**`TeenageEngineeringOp1.cpp`** (Teenage Engineering OP-1, MIDI Mode) binds
+almost nothing, and that's the confirmed, correct scope: its 4 encoders are
+confirmed relative (the same two's-complement-style delta the Novation
+Launchkey Mini mk4 37's encoders use), and every other control -- mode
+buttons, arrows, SS buttons, etc -- is CC-based with no equivalent Synth
+One action worth inventing. REC (CC 38) and PLAY (CC 39) are the exception:
+claimed via `ccFilter` and handled in `onCC()` -- arp<->sequencer mode / arp
+on-off -- the same 2 functions the Novation Launchkey family claims for its
+own Play/Record CCs.
 
 **Not built: Fostex MixTab.** Its Zynthian driver's `dev_ids = ["*"]` --
 literally a wildcard, because the device apparently can't be identified by
@@ -944,6 +1071,13 @@ cycle. Both are left unbuilt rather than guessed at or risked.
 
 ## Known gaps / where to look before trusting this in production
 
+- **CC transport (`CcFilter`/`onCC()`) is new** -- added after the fact once
+  enough drivers (Akai MPK249, all 4 Novation Launchkeys, Korg
+  nanoKONTROL2, Teenage Engineering OP-1) had CC-based transport buttons
+  this framework had no way to reach. Exercised by `tools/cc_filter_test.cpp`
+  (the plumbing) and each retrofitted driver's own test tool (the
+  `onCC()` logic), and built on both platforms, but -- like every CC/note
+  number in this whole feature -- not run against real hardware.
 - WinMM SysEx RX/TX: implemented, not run on real Windows.
 - MPK Mini mk3 protocol: transcribed from a working reference, not
   independently confirmed against a physical unit.

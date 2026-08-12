@@ -71,11 +71,13 @@ public:
     const char *driverName() const override { return "novation-launchpad-pro-mk2"; }
 
     void init(Engine &engine, MidiOutput *midiOut, bool allowConfigure,
-             PadFilter &padFilter) override {
+             PadFilter &padFilter, CcFilter &ccFilter) override {
         mEngine = &engine;
         (void)allowConfigure; // entering DAW mode doesn't write persistent
                               // device state -- same reasoning as the
                               // Arturia KeyLab 61 mk2 driver
+        (void)ccFilter;       // this device's claimed transport buttons are
+                              // Note-based (see padFilter below), not CC
 
         if (midiOut != nullptr && midiOut->isConnected()) {
             midiOut->sendSysEx(kWake, sizeof(kWake));

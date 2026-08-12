@@ -32,17 +32,22 @@
 //  The keybed and pads play as plain notes -- no function pads for this
 //  device either. Its solo/mute pads (96-119, per Zynthian's own per-chain
 //  mixer-strip use of them) are a per-mixer-channel concept with no Synth
-//  One equivalent (see the developer guide's "Why this exists" section),
-//  and its transport (Play/Record), bank-switch and navigation buttons are
-//  all CC-based with no `onCC()` hook available to react to them (same
-//  reasoning as the Akai MPK249's transport CCs -- see AkaiMpk249.cpp's file
-//  header).
+//  One equivalent (see the developer guide's "Why this exists" section), and
+//  its bank-switch/navigation buttons have no equivalent Synth One action
+//  worth inventing, so they're left unbound. Play (CC 0x73) and Record (CC
+//  0x75) ARE claimed via CcFilter and handled in onCC() -- arp on-off /
+//  arp<->sequencer mode -- the same 2 functions the (non-Mini) Launchkey
+//  MK4 37 claims (see NovationLaunchkeyMk4.cpp). Zynthian's own dispatch
+//  never gates these two on a specific channel, so this driver claims them
+//  on the wildcard default rather than a confirmed one.
 //
 //  Protocol facts below are transcribed from Zynthian's shipped driver
 //  (zyngine/ctrldev/zynthian_ctrldev_launchkey_mini_mk4_37.py on the
 //  vangelis branch of zynthian/zynthian-ui) -- a working reference
 //  implementation, not a guess, but not independently validated against
-//  physical hardware in this project's development environment.
+//  physical hardware in this project's development environment. Which
+//  action Play/Record perform is this driver's own design choice, not a
+//  transcribed fact.
 //
 
 #include "NovationLaunchkeyMiniMk4.h"
@@ -55,6 +60,11 @@
 namespace s1::ctrldev {
 
 namespace {
+
+// -- Confirmed fixed transport CCs (channel unconfirmed -- see the file
+// header) --
+constexpr int kCcPlay   = 0x73;
+constexpr int kCcRecord = 0x75;
 
 class NovationLaunchkeyMiniMk4_37 : public ControllerDriver {
 public:
@@ -69,8 +79,8 @@ public:
     const char *driverName() const override { return "novation-launchkey-mini-mk4-37"; }
 
     void init(Engine &engine, MidiOutput *midiOut, bool allowConfigure,
-             PadFilter &padFilter) override {
-        (void)engine;
+             PadFilter &padFilter, CcFilter &ccFilter) override {
+        mEngine = &engine;
         (void)allowConfigure; // nothing to configure
         (void)padFilter;      // no function pads for this device -- see the file header
 
@@ -78,7 +88,29 @@ public:
             midiOut->noteOn(15, 12, 127); // enter session mode
         }
         // Deliberately no knob CC bindings -- see the file header.
+
+        ccFilter.claimCc(kCcPlay);
+        ccFilter.claimCc(kCcRecord);
     }
+
+    /// The 2 claimed transport CCs, handled entirely internally via Engine&.
+    /// Acts only when the CC value is non-zero, matching Zynthian's own
+    /// button-press convention for these same CCs.
+    void onCC(int channel, int cc, int value) override {
+        (void)channel; // claimed with a wildcard channel -- see the file header
+        if (value <= 0 || mEngine == nullptr) return;
+        if (cc == kCcPlay) {
+            mEngine->setParameter(
+                arpIsOn, mEngine->getParameter(arpIsOn) != 0.0f ? 0.0f : 1.0f);
+        } else if (cc == kCcRecord) {
+            mEngine->setParameter(
+                arpIsSequencer,
+                mEngine->getParameter(arpIsSequencer) != 0.0f ? 0.0f : 1.0f);
+        }
+    }
+
+private:
+    Engine *mEngine = nullptr;
 };
 
 } // namespace

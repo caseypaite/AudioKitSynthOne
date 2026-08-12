@@ -37,9 +37,10 @@ void check(bool condition, const char *what) {
 int main() {
     s1::Engine engine; // never started -- setDeviceDefaultCc guards on mKernel
     s1::PadFilter padFilter;
+    s1::CcFilter ccFilter;
     auto driver = s1::ctrldev::makeKorgNanoKontrol2();
 
-    driver->init(engine, /*midiOut=*/nullptr, /*allowConfigure=*/false, padFilter);
+    driver->init(engine, /*midiOut=*/nullptr, /*allowConfigure=*/false, padFilter, ccFilter);
 
     // -- Fixed CC defaults, no SysEx round trip needed -------------------
     check(engine.deviceDefaultForCc(0) == cutoff, "fader 1 (CC0) seeds cutoff");
@@ -54,6 +55,20 @@ int main() {
     // -- No note-based function pads on this device (no keybed, no pads) --
     check(!padFilter.isPadNote(0, 41), "no note is claimed -- every control here is CC-based");
     check(!padFilter.isPadNote(0, 60), "no note is claimed -- every control here is CC-based");
+
+    // -- The 3 claimed transport CCs (channel unconfirmed -- wildcard) ----
+    check(ccFilter.isClaimedCc(0, 41), "PLAY (CC41) is claimed on any channel");
+    check(ccFilter.isClaimedCc(9, 42), "STOP (CC42) is claimed on any channel");
+    check(ccFilter.isClaimedCc(0, 45), "RECORD (CC45) is claimed on any channel");
+    check(!ccFilter.isClaimedCc(0, 32), "a SOLO CC (CC32) is not claimed via CcFilter either");
+
+    driver->onCC(0, 42, 127);
+    check(true, "STOP onCC() does not crash");
+
+    const float before = engine.getParameter(arpIsOn);
+    driver->onCC(0, 41, 127);
+    const float after = engine.getParameter(arpIsOn);
+    check(before == after, "arpIsOn toggle is a no-op against an unstarted Engine (guarded on mKernel), not a crash");
 
     std::printf("\n%s (%d failure%s)\n", gFailures == 0 ? "ALL PASS" : "FAILED",
                gFailures, gFailures == 1 ? "" : "s");

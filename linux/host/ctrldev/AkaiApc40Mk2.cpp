@@ -120,12 +120,13 @@ public:
     const char *driverName() const override { return "akai-apc40-mk2"; }
 
     void init(Engine &engine, MidiOutput *midiOut, bool allowConfigure,
-             PadFilter &padFilter) override {
+             PadFilter &padFilter, CcFilter &ccFilter) override {
         mEngine = &engine;
         (void)midiOut;       // no SysEx TX needed -- the default power-on
                              // mode needs none of the controls this driver
                              // uses (see the file header)
         (void)allowConfigure; // nothing to configure -- fixed CCs, no writable state
+        (void)ccFilter;       // no CC-based function triggers for this device
 
         for (int i = 0; i < kKnobCount; ++i) {
             engine.setDeviceDefaultCc(kDeviceKnobCc[i], kDeviceKnobTarget[i]);

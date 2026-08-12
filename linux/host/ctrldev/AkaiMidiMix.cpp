@@ -108,10 +108,12 @@ public:
     const char *driverName() const override { return "akai-midimix"; }
 
     void init(Engine &engine, MidiOutput *midiOut, bool allowConfigure,
-             PadFilter &padFilter) override {
+             PadFilter &padFilter, CcFilter &ccFilter) override {
         mEngine = &engine;
         (void)midiOut;       // no SysEx TX needed -- this device has none
         (void)allowConfigure; // nothing to configure -- fixed CCs, no writable state
+        (void)ccFilter;       // this device's global buttons are Note-based
+                              // (claimed via padFilter below), not CC
 
         for (int i = 0; i < kStripCount; ++i) {
             engine.setDeviceDefaultCc(kKnobRow1Cc[i], kKnobRow1Target[i]);

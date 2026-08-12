@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "PadFilter.h"
+#include "CcFilter.h"
 
 namespace s1 {
 
@@ -70,9 +71,12 @@ public:
     /// where a driver claims (channel, note) pairs it wants to repurpose as
     /// function pads (see PadFilter.h) -- claiming is what actually stops
     /// them from playing notes, by diverting them before the MIDI reader
-    /// thread ever pushes them onto the note/CC queue.
+    /// thread ever pushes them onto the note/CC queue. `ccFilter` is where
+    /// a driver claims (channel, CC) pairs it wants delivered to onCC() (see
+    /// CcFilter.h) -- unlike padFilter, claiming a CC does not suppress it;
+    /// it still reaches Engine::handleMidi() exactly as before.
     virtual void init(Engine &engine, MidiOutput *midiOut, bool allowConfigure,
-                      PadFilter &padFilter) = 0;
+                      PadFilter &padFilter, CcFilter &ccFilter) = 0;
 
     /// A complete SysEx message addressed to this device's input arrived.
     /// Default: ignore.
@@ -99,6 +103,20 @@ public:
     virtual PadReport onPadButton(int channel, int note, bool isDown) {
         (void)channel; (void)note; (void)isDown;
         return {};
+    }
+
+    /// A CC event arrived on (channel, cc) that this driver had claimed via
+    /// `ccFilter` in init() -- delivered in addition to the ordinary
+    /// MidiQueue path, not instead of it (see CcFilter.h for why no
+    /// suppression is needed here, unlike onPadButton()). The hook for
+    /// devices whose transport/mode buttons are Control Change rather than
+    /// Note -- most controllers with CC-based buttons have no other way for
+    /// a driver to react to a press at all. `value` is the raw 0-127 CC
+    /// value; a momentary button typically sends a non-zero value on press
+    /// and 0 (or nothing) on release, but that convention is device-specific
+    /// -- check it, don't assume it. Default: ignore.
+    virtual void onCC(int channel, int cc, int value) {
+        (void)channel; (void)cc; (void)value;
     }
 };
 

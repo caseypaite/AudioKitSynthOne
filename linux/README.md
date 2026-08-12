@@ -171,15 +171,33 @@ controller.
 ./build/synthone --controller-driver akai-mpk-mini-mk3   # force-load
 ```
 
-Currently supported: **Akai MPK Mini mk3**. At startup the driver queries the
-device over SysEx for its current knob CC assignments and maps the 8 knobs to
-cutoff, resonance, attack, release, LFO 1 rate, reverb mix, delay mix and
-master volume; if the query doesn't complete (no matching output port found,
-or the device doesn't reply), the knobs are simply unbound until you MIDI
-Learn them yourself -- there's no hardcoded factory-CC guess, since assuming
-wrong risks reassigning a universally-reserved CC like the mod wheel. The 16
-pads and the keybed need no special handling at all: they play notes exactly
-like any other MIDI keyboard, on whatever channel the device sends them on.
+Currently supported: **20 controllers** across 7 vendors -- Akai (MPK Mini
+mk3, MIDI Mix, APC Key 25, APC Key 25 mk2, APC40 mk2, MPK249), Arturia
+(KeyLab mkII 61), Novation (Launchkey Mini mk3/mk4 37, Launchkey MK3
+88/MK4 37, Launchpad Mini, Launchpad X, Launchpad Mini mk3, Launchpad Pro
+mk2/mk3), Korg (nanoKONTROL2), Behringer (MOTÖR61/49), WORLDE (MINI), and
+Teenage Engineering (OP-1). Run `--list-controller-drivers` for the exact
+driver names, or see the
+[user guide](docs/midi-controller-user-guide.md#supported-controllers) for
+what each one maps and any device-specific caveats.
+
+Drivers vary in shape depending on what the device actually needs. The Akai
+MPK Mini mk3 is the fullest example: at startup it queries the device over
+SysEx for its current knob CC assignments and maps the 8 knobs to cutoff,
+resonance, attack, release, LFO 1 rate, reverb mix, delay mix and master
+volume; if the query doesn't complete (no matching output port found, or the
+device doesn't reply), the knobs are simply unbound until you MIDI Learn them
+yourself -- there's no hardcoded factory-CC guess, since assuming wrong risks
+reassigning a universally-reserved CC like the mod wheel. The 16 pads and the
+keybed need no special handling at all: they play notes exactly like any
+other MIDI keyboard, on whatever channel the device sends them on. Most other
+drivers are simpler: many devices send fixed, always-on CCs with no SysEx
+needed at all, some need a one-time mode-entry handshake (SysEx or, for the
+Novation Launchkey family, a plain MIDI Note) before their knobs mean
+anything, and a few (the Novation Launchkey Mini mk4 37, part of the Teenage
+Engineering OP-1) turned out to have *relative*-encoder knobs that can't be
+mapped at all with this framework's current CC handling, so they're
+deliberately left unbound rather than guessed at.
 
 `--controller-driver-configure` (off by default) permits a driver to *write*
 configuration to its device, not just read from it -- the MPK driver
@@ -194,11 +212,13 @@ working reference implementation rather than a guess, but it has not been
 validated against physical hardware in this project's development
 environment -- see the comments in `host/ctrldev/AkaiMpkMiniMk3.cpp` for
 which fields are protocol-confirmed versus a judgment call (the 8 target
-parameters, the Windows device-name hint). The WinMM SysEx transport
-(`host/WinMidi.cpp`/`WinMidiOut.cpp`) is likewise implemented from documented
-WinMM behaviour but untested on real Windows, since this port is
+parameters, the Windows device-name hint). Every other driver follows the
+same transcribed-not-guessed discipline, cited in its own file header; none
+has been validated against physical hardware either. The WinMM SysEx
+transport (`host/WinMidi.cpp`/`WinMidiOut.cpp`) is likewise implemented from
+documented WinMM behaviour but untested on real Windows, since this port is
 cross-compiled from Linux -- test both before relying on this in practice on
-Windows or with real MPK hardware.
+Windows or with real hardware.
 
 There's no hotplug detection: a driver is matched once at startup against
 whatever `--midi` already connected, the same limitation regular MIDI ports

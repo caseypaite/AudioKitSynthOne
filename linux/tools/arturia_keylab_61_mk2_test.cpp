@@ -40,11 +40,12 @@ int main() {
     s1::Engine engine; // never started -- Engine accessors used here all
                        // guard on mKernel
     s1::PadFilter padFilter;
+    s1::CcFilter ccFilter;
     auto driver = s1::ctrldev::makeArturiaKeyLab61Mk2();
 
     // nullptr MidiOutput: init() must not crash trying to send the
     // DAW-mode-entry handshake.
-    driver->init(engine, /*midiOut=*/nullptr, /*allowConfigure=*/false, padFilter);
+    driver->init(engine, /*midiOut=*/nullptr, /*allowConfigure=*/false, padFilter, ccFilter);
     check(true, "init() with no MidiOutput does not crash (DAW-mode handshake skipped)");
 
     // A MidiOutput that was never opened/connected: isConnected() is false
@@ -52,8 +53,9 @@ int main() {
     // ALSA/JACK backend needed for this check.
     s1::MidiOutput unconnectedOut;
     s1::PadFilter padFilter2;
+    s1::CcFilter ccFilter2;
     auto driver2 = s1::ctrldev::makeArturiaKeyLab61Mk2();
-    driver2->init(engine, &unconnectedOut, /*allowConfigure=*/false, padFilter2);
+    driver2->init(engine, &unconnectedOut, /*allowConfigure=*/false, padFilter2, ccFilter2);
     check(!unconnectedOut.isConnected(),
          "init() with an unconnected MidiOutput does not attempt to connect it");
 

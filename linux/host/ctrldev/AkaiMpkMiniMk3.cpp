@@ -137,11 +137,14 @@ public:
     const char *driverName() const override { return "akai-mpk-mini-mk3"; }
 
     void init(Engine &engine, MidiOutput *midiOut, bool allowConfigure,
-             PadFilter &padFilter) override {
+             PadFilter &padFilter, CcFilter &ccFilter) override {
         mEngine = &engine;
         mMidiOut = midiOut;
         mAllowConfigure = allowConfigure;
         mPadFilter = &padFilter;
+        (void)ccFilter; // this device's function pads are Note-based (see
+                        // parsePads()), and its transport buttons are among
+                        // them -- no CC-based control needs claiming here
 
         // No hardcoded factory-CC fallback: common factory defaults vary by
         // firmware/program slot and were never confirmed against real

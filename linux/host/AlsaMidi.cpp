@@ -145,13 +145,16 @@ std::vector<MidiSource> MidiInput::listSources() {
 
 void MidiInput::start(MidiQueue *queue, SysExQueue *sysexQueue,
                       ProgramChangeQueue *programChangeQueue,
-                      const PadFilter *padFilter, PadButtonQueue *padButtonQueue) {
+                      const PadFilter *padFilter, PadButtonQueue *padButtonQueue,
+                      const CcFilter *ccFilter, CcQueue *ccQueue) {
     if (mSeq == nullptr || mRunning.load()) return;
     mQueue = queue;
     mSysExQueue = sysexQueue;
     mProgramChangeQueue = programChangeQueue;
     mPadFilter = padFilter;
     mPadButtonQueue = padButtonQueue;
+    mCcFilter = ccFilter;
+    mCcQueue = ccQueue;
     mRunning.store(true);
     mThread = std::thread(&MidiInput::run, this);
 }
@@ -221,13 +224,28 @@ void MidiInput::run() {
                     m.data[2] = velocity;
                     break;
                 }
-                case SND_SEQ_EVENT_CONTROLLER:
+                case SND_SEQ_EVENT_CONTROLLER: {
+                    const uint8_t ccChan = static_cast<uint8_t>(event->data.control.channel & 0x0F);
+                    const uint8_t ccNum = static_cast<uint8_t>(event->data.control.param & 0x7F);
+                    const uint8_t ccVal = static_cast<uint8_t>(event->data.control.value & 0x7F);
                     m.length = 3;
-                    m.data[0] = static_cast<uint8_t>(0xB0 |
-                                (event->data.control.channel & 0x0F));
-                    m.data[1] = static_cast<uint8_t>(event->data.control.param & 0x7F);
-                    m.data[2] = static_cast<uint8_t>(event->data.control.value & 0x7F);
+                    m.data[0] = static_cast<uint8_t>(0xB0 | ccChan);
+                    m.data[1] = ccNum;
+                    m.data[2] = ccVal;
+                    // Additional, non-suppressing push for a claimed CC --
+                    // see CcFilter.h for why this duplicates rather than
+                    // diverts, unlike the pad-note case above.
+                    if (mCcFilter != nullptr && mCcQueue != nullptr &&
+                        mCcFilter->isClaimedCc(ccChan, ccNum)) {
+                        CcMessage cc;
+                        cc.channel = ccChan;
+                        cc.cc = ccNum;
+                        cc.value = ccVal;
+                        cc.sourceId = event->source.client;
+                        mCcQueue->push(cc);
+                    }
                     break;
+                }
                 case SND_SEQ_EVENT_PITCHBEND: {
                     // ALSA reports pitch bend centred on zero; MIDI wants 0..16383.
                     const int value = event->data.control.value + 8192;

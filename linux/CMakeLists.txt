@@ -266,6 +266,15 @@ add_executable(sysex_assembler_test tools/sysex_assembler_test.cpp)
 target_include_directories(sysex_assembler_test PRIVATE host)
 
 # ---------------------------------------------------------------------------
+# cc_filter_test: exercises CcFilter.h's CcFilter/CcQueue against synthetic
+# data. Header-only and platform-independent, same reasoning as
+# sysex_assembler_test above -- builds unconditionally.
+# ---------------------------------------------------------------------------
+
+add_executable(cc_filter_test tools/cc_filter_test.cpp)
+target_include_directories(cc_filter_test PRIVATE host)
+
+# ---------------------------------------------------------------------------
 # Platform dependencies
 #
 # Linux takes its audio, MIDI and windowing libraries from the system through

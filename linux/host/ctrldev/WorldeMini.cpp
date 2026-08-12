@@ -68,10 +68,14 @@ public:
     const char *driverName() const override { return "worlde-mini"; }
 
     void init(Engine &engine, MidiOutput *midiOut, bool allowConfigure,
-             PadFilter &padFilter) override {
+             PadFilter &padFilter, CcFilter &ccFilter) override {
         mEngine = &engine;
         (void)midiOut;       // no SysEx TX needed -- this device has none
         (void)allowConfigure; // nothing to configure -- fixed notes, no writable state
+        (void)ccFilter;       // this device's claimed pads are Note-based
+                              // (see padFilter below), not CC; the CC bank
+                              // (22-29) is deliberately unbound -- see the
+                              // file header
 
         // Channel is explicitly confirmed here (unlike most drivers in this
         // port, which default to a wildcard channel because it's

@@ -24,21 +24,21 @@ as expected.
 | Akai APC Key 25 (original) | `akai-apc-key25` | Maps the 8 knobs to synth parameters. STOP ALL CLIPS/PLAY/RECORD are dedicated transport buttons; the keybed and the 40-pad clip-launch grid play as plain notes -- see [Akai APC Key 25 / mk2](#akai-apc-key-25--mk2). |
 | Akai APC Key 25 mk2 | `akai-apc-key25-mk2` | Same mapping and transport buttons as the original APC Key 25 -- see [Akai APC Key 25 / mk2](#akai-apc-key-25--mk2). |
 | Akai APC40 mk2 | `akai-apc40-mk2` | Maps 19 knobs/faders to synth parameters (see [Akai APC40 mk2](#akai-apc40-mk2)); STOP ALL CLIPS/PLAY/RECORD are dedicated transport buttons; the clip-launch grid and per-track buttons play as plain notes. |
-| Akai MPK249 | `akai-mpk249` | Maps 24 knobs/faders to synth parameters -- **requires the device's onboard preset 25 ("MPK Generic")**, see [Akai MPK249](#akai-mpk249). No function pads; the keybed and pads play as plain notes. |
+| Akai MPK249 | `akai-mpk249` | Maps 24 knobs/faders to synth parameters and STOP/PLAY/RECORD to transport actions -- **requires the device's onboard preset 25 ("MPK Generic")**, see [Akai MPK249](#akai-mpk249). The keybed and pads play as plain notes. |
 | Arturia KeyLab mkII 61 | `arturia-keylab-61-mk2` | Automatically switches the device into "DAW mode" on startup so STOP/PLAY-PAUSE/RECORD/METRONOME work as dedicated transport buttons -- see [Arturia KeyLab mkII 61](#arturia-keylab-mkii-61). No knobs/faders mapped (none are documented); the keybed and pad grid play as plain notes. |
-| Novation Launchkey Mini mk3 | `novation-launchkey-mini-mk3` | Maps the 8 knobs to synth parameters -- see [Novation Launchkey family](#novation-launchkey-family). No function pads; the keybed and pads play as plain notes. |
-| Novation Launchkey MK3 88 | `novation-launchkey-mk3-88` | Maps the 8 knobs, 8 faders and master fader to synth parameters -- see [Novation Launchkey family](#novation-launchkey-family). No function pads. |
-| Novation Launchkey MK4 37 | `novation-launchkey-mk4-37` | Maps the 8 knobs to synth parameters -- see [Novation Launchkey family](#novation-launchkey-family). No function pads. |
-| Novation Launchkey Mini MK4 37 | `novation-launchkey-mini-mk4-37` | No knobs mapped -- this unit's knobs are confirmed relative-encoder output, which can't be mapped safely, see [Novation Launchkey family](#novation-launchkey-family). Device recognition only. |
+| Novation Launchkey Mini mk3 | `novation-launchkey-mini-mk3` | Maps the 8 knobs and Play/Record to synth parameters/transport actions -- see [Novation Launchkey family](#novation-launchkey-family). The keybed and pads play as plain notes. |
+| Novation Launchkey MK3 88 | `novation-launchkey-mk3-88` | Maps the 8 knobs, 8 faders, master fader and Play/Record to synth parameters/transport actions -- see [Novation Launchkey family](#novation-launchkey-family). |
+| Novation Launchkey MK4 37 | `novation-launchkey-mk4-37` | Maps the 8 knobs and Play/Record to synth parameters/transport actions -- see [Novation Launchkey family](#novation-launchkey-family). |
+| Novation Launchkey Mini MK4 37 | `novation-launchkey-mini-mk4-37` | No knobs mapped -- this unit's knobs are confirmed relative-encoder output, which can't be mapped safely. Play/Record ARE mapped to transport actions -- see [Novation Launchkey family](#novation-launchkey-family). |
 | Novation Launchpad Mini (mk1) | `novation-launchpad-mini` | No knobs, faders, or function pads exist on this device -- see [Novation Launchpad family](#novation-launchpad-family). Device recognition only; the grid plays as plain notes. |
 | Novation Launchpad X | `novation-launchpad-x` | Same as Launchpad Mini -- device recognition only, grid plays as plain notes -- see [Novation Launchpad family](#novation-launchpad-family). |
 | Novation Launchpad Mini mk3 | `novation-launchpad-mini-mk3` | Same as Launchpad Mini -- see [Novation Launchpad family](#novation-launchpad-family). |
 | Novation Launchpad Pro mk2 | `novation-launchpad-pro-mk2` | Switches into DAW mode on startup so STOP/PLAY/RECORD work as dedicated transport buttons -- see [Novation Launchpad family](#novation-launchpad-family). The grid plays as plain notes. |
 | Novation Launchpad Pro mk3 | `novation-launchpad-pro-mk3` | Same as Launchpad Mini -- see [Novation Launchpad family](#novation-launchpad-family). |
-| Korg nanoKONTROL2 | `korg-nanokontrol2` | Maps 7 of the 8 faders and all 8 knobs to synth parameters -- see [Korg nanoKONTROL2](#korg-nanokontrol2). No buttons mapped; this device has no keybed or pads. |
+| Korg nanoKONTROL2 | `korg-nanokontrol2` | Maps 7 of the 8 faders, all 8 knobs, and Play/Stop/Record to synth parameters/transport actions -- see [Korg nanoKONTROL2](#korg-nanokontrol2). This device has no keybed or pads. |
 | Behringer MOTÖR61 / MOTÖR49 | `behringer-motor` | Maps 25 faders/encoders to synth parameters and 4 pads to transport functions -- see [Behringer MOTOR61/49](#behringer-motor61-motor49). |
 | WORLDE MINI | `worlde-mini` | Maps 4 of 8 pads to transport functions -- see [WORLDE MINI](#worlde-mini). No knobs mapped (none are documented); the keybed and other pads play as plain notes. |
-| Teenage Engineering OP-1 | `teenage-engineering-op1` | Device recognition only -- see [Teenage Engineering OP-1](#teenage-engineering-op-1). Its knobs report relative turns, and every button is a type this driver framework can't react to. |
+| Teenage Engineering OP-1 | `teenage-engineering-op1` | Maps PLAY/REC to transport actions -- see [Teenage Engineering OP-1](#teenage-engineering-op-1). Its knobs report relative turns and aren't mapped; every other button has no Synth One equivalent. |
 
 Don't see your controller? It still works as a plain MIDI keyboard/controller
 -- see [Using it with an unsupported controller](#using-it-with-an-unsupported-controller)
@@ -296,14 +296,15 @@ mapping in this driver.
 | The 8 knobs, Bank A | Cutoff, resonance, attack, release, LFO 1 rate, reverb mix, delay mix, master volume |
 | The 8 knobs, Bank B | Filter attack/decay/sustain/release, filter/amp env mix, envelope pitch tracking, amp decay, amp sustain |
 | The 8 faders | OSC1/OSC2 volume, OSC2 detune, sub volume, FM amount, noise volume, glide, OSC1/2 balance |
+| STOP | Panic |
+| PLAY | Arp/Seq on-off |
+| RECORD | Switch between Arp mode and Sequencer mode |
 
 Not mapped: the BANK A/B/C switches themselves (solo/mute/record-arm per
 channel strip on Zynthian's reference design -- Synth One has no per-channel
-mixer for them to control) and the dedicated Play/Stop/Record/Rewind/
-Fast-Forward/Loop transport buttons (these report as one-shot MIDI CC
-presses with no way for this driver to turn that into a toggle, so binding
-them would only ever set a value once, never flip it back). The keybed and
-pads play as plain notes.
+mixer for them to control) and the Rewind/Fast-Forward/Loop transport
+buttons (no Synth One equivalent action). The keybed and pads play as plain
+notes.
 
 ## Arturia KeyLab mkII 61
 
@@ -340,22 +341,27 @@ send the CCs each driver expects.
 | Launchkey MK4 37 | Filter attack/decay/sustain/release, filter/amp env mix, envelope pitch tracking, amp decay, amp sustain | -- (no physical sliders) |
 | Launchkey Mini MK4 37 | **Not mapped** -- this unit's knobs report relative turns, not a position, which can't be translated into a parameter value safely. Bind them yourself with MIDI Learn if you want to use them. | -- |
 
-Not mapped on any of the four: the transport (Play/Record), navigation
-(track left/right, up/down), and per-channel chain buttons (select/mute/
-solo) -- all report as MIDI CC presses with no way for this driver framework
-to react to a press/release pair, so nothing is bound rather than
-half-implemented. The keybed and pads play as plain notes on all four.
+All four also map Play and Record:
+
+| Control | Maps to |
+| --- | --- |
+| PLAY | Arp/Seq on-off |
+| RECORD | Switch between Arp mode and Sequencer mode |
+
+Not mapped on any of the four: navigation (track left/right, up/down) and
+per-channel chain buttons (select/mute/solo) -- no Synth One equivalent
+action for either. The keybed and pads play as plain notes on all four.
 
 ## Novation Launchpad family
 
 Five Launchpad devices are recognised. Four of them -- Launchpad Mini (the
 original), Launchpad X, Launchpad Mini mk3, and Launchpad Pro mk3 -- do
 **nothing beyond recognising the device**: no knobs exist on any of them to
-map, and none has a dedicated button this driver can safely turn into a
-useful function (their arrow/session buttons report as CC presses, the same
-limitation the Launchkey family's transport buttons have). The 8x8
-clip-launch grid plays as plain, ordinary notes on all of them, same as any
-unclaimed pad on any other supported controller.
+map, and their only dedicated buttons are arrow keys, which have no
+Synth One transport-style action to map to (unlike the Play/Record buttons
+the Akai/Novation/Korg drivers claim elsewhere). The 8x8 clip-launch grid
+plays as plain, ordinary notes on all of them, same as any unclaimed pad on
+any other supported controller.
 
 **Launchpad Pro mk2** is the exception: on startup, this driver switches it
 into DAW mode (an automatic SysEx handshake, nothing you need to do) so 3
@@ -381,12 +387,13 @@ everything is mapped the moment the driver loads.
 | Fader 2 | **Not mapped** -- this fader happens to share CC1 with the universal MIDI mod wheel convention. Binding it would mean a mod wheel on a different, simultaneously-connected keyboard could unexpectedly move whatever this fader controlled, so it's left free. |
 | Faders 3-8 | Attack, release, LFO 1 rate, reverb mix, delay mix, master volume |
 | Knobs 1-8 | OSC1/OSC2 volume, OSC2 detune, sub volume, FM amount, noise volume, glide, OSC1/2 balance |
+| PLAY | Arp/Seq on-off |
+| STOP | Panic |
+| RECORD | Switch between Arp mode and Sequencer mode |
 
-Not mapped: the SOLO/MUTE/REC button rows, transport (Play/Stop/Record/
-Rewind/Fast-Forward/Cycle), and track/marker navigation buttons -- every one
-of them reports as a MIDI CC press with no way for this driver framework to
-react to it (the same limitation the Launchkey/MPK249 transport buttons
-have -- see [Akai MPK249](#akai-mpk249)).
+Not mapped: the SOLO/MUTE/REC button rows and track/marker navigation
+buttons -- these are per-mixer-channel controls on Zynthian's reference
+design, with no Synth One equivalent for them to control.
 
 ## Behringer MOTOR61/49
 
@@ -430,12 +437,20 @@ device).
 
 ## Teenage Engineering OP-1
 
-Set the OP-1 to MIDI Mode first (Shift+COM, then choose CTRL). This driver
-recognizes the device but maps nothing -- its knobs report relative turns
-rather than a position (the same limitation as the Novation Launchkey Mini
-MK4 37's knobs), and every button on the device reports as a MIDI CC press
-rather than a Note, which this driver framework has no way to react to. The
-keys/pads play as plain notes; bind anything else yourself with MIDI Learn.
+Set the OP-1 to MIDI Mode first (Shift+COM, then choose CTRL).
+
+| Control | Maps to |
+| --- | --- |
+| PLAY | Arp/Seq on-off |
+| REC | Switch between Arp mode and Sequencer mode |
+
+Nothing else is mapped: the 4 encoders report relative turns rather than a
+position (the same limitation as the Novation Launchkey Mini MK4 37's
+knobs), and every other button (HELP, METRONOME, the 4 MODE buttons,
+T1-T4, arrows, SCISSOR, the 8 SS buttons, SEQ, SHIFT, MICRO, COM) has no
+Synth One equivalent action worth mapping. There's no confirmed dedicated
+STOP button on this device either. The keys/pads play as plain notes; bind
+anything else yourself with MIDI Learn.
 
 ## How this interacts with MIDI Learn
 
@@ -531,8 +546,19 @@ the same "unverified handshake" caveat.
 **My Korg nanoKONTROL2's fader 2 doesn't do anything.** That's expected --
 see [Korg nanoKONTROL2](#korg-nanokontrol2), it deliberately isn't mapped to
 avoid colliding with the mod wheel convention. Bind it yourself with MIDI
-Learn if you want to use it for something. None of its buttons (SOLO/MUTE/
-REC, transport, navigation) do anything either -- see that section for why.
+Learn if you want to use it for something. Its SOLO/MUTE/REC and navigation
+buttons don't do anything either (no Synth One equivalent for them) -- but
+PLAY/STOP/RECORD should work; see the next entry if they don't.
+
+**PLAY/STOP/RECORD (or similar transport buttons) don't do anything on my
+Akai MPK249, Novation Launchkey, Korg nanoKONTROL2, or Teenage Engineering
+OP-1.** These report as MIDI CC presses rather than Notes, and this driver
+framework only recently gained a way to react to that (see the developer
+guide's "CC transport" section if you're curious) -- on the MPK249 and the
+Launchkey Mini mk3/MK3 88, they're additionally gated to one confirmed MIDI
+channel, so a device reporting on a different channel than expected would
+show this symptom too. As always, none of this affects the knobs/faders,
+which are a separate, independently-working path.
 
 **Switching modes with PROG SELECT doesn't change what the knobs control.**
 The knobs should go briefly unresponsive and then pick up the new mode's

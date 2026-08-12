@@ -338,6 +338,8 @@ int main(int argc, char **argv) {
     s1::ProgramChangeQueue programChangeQueue;
     s1::PadFilter padFilter;
     s1::PadButtonQueue padButtonQueue;
+    s1::CcFilter ccFilter;
+    s1::CcQueue ccQueue;
     s1::MidiInput midi;
     std::string midiStatus;
     if (!midi.open("SynthOne", error)) {
@@ -350,7 +352,8 @@ int main(int argc, char **argv) {
             midiStatus = midi.portName() +
                          (midiSpec == "all" ? " <- all sources" : " <- " + midiSpec);
         }
-        midi.start(&midiQueue, &sysexQueue, &programChangeQueue, &padFilter, &padButtonQueue);
+        midi.start(&midiQueue, &sysexQueue, &programChangeQueue, &padFilter, &padButtonQueue,
+                  &ccFilter, &ccQueue);
     }
 
     // No panel-select observer registered here -- the headless CLI has no
@@ -361,7 +364,7 @@ int main(int argc, char **argv) {
     std::string driverStatus = "off";
     if (controllerDriverSpec != "off") {
         driverManager.load(controllerDriverSpec, engine, midi.connectedSources(),
-                           controllerDriverConfigure, padFilter, driverStatus);
+                           controllerDriverConfigure, padFilter, ccFilter, driverStatus);
     }
 
     s1::MidiOutput midiOut;
@@ -465,6 +468,9 @@ int main(int argc, char **argv) {
 
         s1::PadButtonMessage padMsg;
         while (padButtonQueue.pop(padMsg)) driverManager.dispatchPadButton(padMsg);
+
+        s1::CcMessage ccMsg;
+        while (ccQueue.pop(ccMsg)) driverManager.dispatchCc(ccMsg);
 
         if (testNote >= 0) {
             // 1 s on, 0.5 s off, at the 50 ms tick below.

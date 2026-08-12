@@ -25,6 +25,7 @@
 #include "MidiOutput.h"
 #include "MidiSysEx.h"
 #include "PadFilter.h"
+#include "CcFilter.h"
 
 namespace s1 { class Engine; }
 
@@ -45,16 +46,17 @@ public:
     /// --midi-out the caller may also have configured, so the two don't
     /// fight over one MidiOutput's connection state.
     /// Fills `status` with a human-readable summary either way (what
-    /// loaded, or why nothing did) for the caller to print. `allowConfigure`
-    /// and `padFilter` are forwarded to the driver's init() -- see
-    /// ControllerDriver::init(). `padFilter` is owned by the caller and must
-    /// outlive both this manager and the MidiInput it was also given to
-    /// (see PadFilter.h) -- it's passed empty here and populated
-    /// asynchronously once the driver's own discovery completes, the same
-    /// timing Engine::mDeviceDefaultCc already relies on.
+    /// loaded, or why nothing did) for the caller to print. `allowConfigure`,
+    /// `padFilter` and `ccFilter` are forwarded to the driver's init() --
+    /// see ControllerDriver::init(). Both filters are owned by the caller
+    /// and must outlive both this manager and the MidiInput they were also
+    /// given to (see PadFilter.h/CcFilter.h) -- they're passed empty here
+    /// and populated asynchronously once the driver's own discovery
+    /// completes, the same timing Engine::mDeviceDefaultCc already relies
+    /// on.
     bool load(const std::string &wantedName, Engine &engine,
              const std::vector<MidiSource> &connectedInputs, bool allowConfigure,
-             PadFilter &padFilter, std::string &status);
+             PadFilter &padFilter, CcFilter &ccFilter, std::string &status);
 
     /// Routes a fully-reassembled SysEx message (from SysExQueue) to
     /// whichever loaded driver's input it matches, by SysExMessage::sourceId
@@ -74,6 +76,14 @@ public:
     /// returns a reported PadReport (a bottom-row/GUI concern the driver
     /// can't act on itself), forwards it to the registered observer, if any.
     void dispatchPadButton(const PadButtonMessage &msg);
+
+    /// Routes a claimed CC message (from CcQueue) the same way the other
+    /// dispatch*() methods do, by sourceId, offered to every loaded driver
+    /// if unmatched. Calls the matching driver's onCC() -- see CcFilter.h
+    /// for why, unlike dispatchPadButton(), there is no suppression/
+    /// observer-forwarding step here: onCC() either acts directly via its
+    /// own Engine&, or does nothing.
+    void dispatchCc(const CcMessage &msg);
 
     /// Registered by a GUI host to react to a bottom-row pad's panel-select
     /// report -- never invoked for a top-row pad, since a driver handles

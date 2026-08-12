@@ -32,9 +32,10 @@ void check(bool condition, const char *what) {
 int main() {
     s1::Engine engine;
     s1::PadFilter padFilter;
+    s1::CcFilter ccFilter;
     auto driver = s1::ctrldev::makeNovationLaunchkeyMk3_88();
 
-    driver->init(engine, /*midiOut=*/nullptr, /*allowConfigure=*/false, padFilter);
+    driver->init(engine, /*midiOut=*/nullptr, /*allowConfigure=*/false, padFilter, ccFilter);
     check(true, "init() with no MidiOutput does not crash (session-mode noteOn skipped)");
 
     check(engine.deviceDefaultForCc(21) == morph1Volume, "knob 1 (CC21) seeds morph1Volume");
@@ -44,6 +45,16 @@ int main() {
     check(engine.deviceDefaultForCc(61) == masterVolume, "master fader (CC61) seeds masterVolume");
     check(engine.deviceDefaultForCc(1) == S1Parameter::S1ParameterCount,
          "an unrelated CC (mod wheel, CC1) is untouched");
+
+    // -- The 2 claimed transport CCs, on the confirmed session channel 15 --
+    check(ccFilter.isClaimedCc(15, 0x73), "PLAY (CC 0x73, channel 15) is claimed");
+    check(ccFilter.isClaimedCc(15, 0x75), "RECORD (CC 0x75, channel 15) is claimed");
+    check(!ccFilter.isClaimedCc(0, 0x73), "the claimed channel is restricted, not a wildcard");
+
+    const float before = engine.getParameter(arpIsOn);
+    driver->onCC(15, 0x73, 127);
+    const float after = engine.getParameter(arpIsOn);
+    check(before == after, "arpIsOn toggle is a no-op against an unstarted Engine (guarded on mKernel), not a crash");
 
     std::printf("\n%s (%d failure%s)\n", gFailures == 0 ? "ALL PASS" : "FAILED",
                gFailures, gFailures == 1 ? "" : "s");

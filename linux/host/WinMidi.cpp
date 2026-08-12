@@ -169,6 +169,26 @@ void MidiInput::enqueuePacked(uint32_t packed, void *handle) {
         }
         mProgramChangeQueue->push(pc);
     }
+
+    // Same additional-push shape for a claimed CC -- see CcFilter.h for why
+    // this duplicates rather than diverts, unlike the pad-note case above.
+    if (kind == 0xB0 && mCcFilter != nullptr && mCcQueue != nullptr) {
+        const int channel = status & 0x0F;
+        const int ccNum = m.data[1];
+        if (mCcFilter->isClaimedCc(channel, ccNum)) {
+            CcMessage cc;
+            cc.channel = channel;
+            cc.cc = ccNum;
+            cc.value = m.data[2];
+            for (size_t i = 0; i < mHandles.size(); ++i) {
+                if (mHandles[i] == handle) {
+                    cc.sourceId = mConnected[i].client;
+                    break;
+                }
+            }
+            mCcQueue->push(cc);
+        }
+    }
 }
 
 void MidiInput::enqueueSysExFragment(void *hdr, void *handle) {
@@ -294,7 +314,8 @@ std::vector<MidiSource> MidiInput::listSources() {
 
 void MidiInput::start(MidiQueue *queue, SysExQueue *sysexQueue,
                       ProgramChangeQueue *programChangeQueue,
-                      const PadFilter *padFilter, PadButtonQueue *padButtonQueue) {
+                      const PadFilter *padFilter, PadButtonQueue *padButtonQueue,
+                      const CcFilter *ccFilter, CcQueue *ccQueue) {
     if (mHandles.empty() || mRunning.load()) return;
 
     // Publish the queues before the callbacks can fire.
@@ -303,6 +324,8 @@ void MidiInput::start(MidiQueue *queue, SysExQueue *sysexQueue,
     mProgramChangeQueue = programChangeQueue;
     mPadFilter = padFilter;
     mPadButtonQueue = padButtonQueue;
+    mCcFilter = ccFilter;
+    mCcQueue = ccQueue;
     mRunning.store(true);
     for (void *handle : mHandles) {
         postSysExBuffers(static_cast<HMIDIIN>(handle), mSysExHeaders, mSysExHeaderOwners);

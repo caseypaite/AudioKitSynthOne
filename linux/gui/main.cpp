@@ -457,12 +457,15 @@ int main(int argc, char **argv) {
     s1::ProgramChangeQueue programChangeQueue;
     s1::PadFilter padFilter;
     s1::PadButtonQueue padButtonQueue;
+    s1::CcFilter ccFilter;
+    s1::CcQueue ccQueue;
     s1::MidiInput midi;
     std::string midiStatus = "unavailable";
     if (midi.open("SynthOne", error)) {
         std::string ignored;
         midi.connect(midiSpec, ignored);
-        midi.start(&midiQueue, &sysexQueue, &programChangeQueue, &padFilter, &padButtonQueue);
+        midi.start(&midiQueue, &sysexQueue, &programChangeQueue, &padFilter, &padButtonQueue,
+                  &ccFilter, &ccQueue);
         midiStatus = midi.portName();
     }
 
@@ -492,7 +495,7 @@ int main(int argc, char **argv) {
     if (controllerDriverSpec != "off") {
         std::string driverStatus;
         if (driverManager.load(controllerDriverSpec, engine, midi.connectedSources(),
-                               controllerDriverConfigure, padFilter, driverStatus)) {
+                               controllerDriverConfigure, padFilter, ccFilter, driverStatus)) {
             std::printf("controller driver: %s\n", driverStatus.c_str());
         }
     }
@@ -714,6 +717,9 @@ int main(int argc, char **argv) {
 
         s1::PadButtonMessage padMsg;
         while (padButtonQueue.pop(padMsg)) driverManager.dispatchPadButton(padMsg);
+
+        s1::CcMessage ccMsg;
+        while (ccQueue.pop(ccMsg)) driverManager.dispatchCc(ccMsg);
 
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();

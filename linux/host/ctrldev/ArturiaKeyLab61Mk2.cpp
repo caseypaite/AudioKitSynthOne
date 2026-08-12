@@ -91,10 +91,12 @@ public:
     const char *driverName() const override { return "arturia-keylab-61-mk2"; }
 
     void init(Engine &engine, MidiOutput *midiOut, bool allowConfigure,
-             PadFilter &padFilter) override {
+             PadFilter &padFilter, CcFilter &ccFilter) override {
         mEngine = &engine;
         (void)allowConfigure; // entering DAW mode doesn't write persistent
                               // device state -- see the file header
+        (void)ccFilter;       // this device's claimed transport buttons are
+                              // Note-based (see padFilter below), not CC
 
         if (midiOut != nullptr && midiOut->isConnected()) {
             midiOut->sendSysEx(kEnterDawPresetLive, sizeof(kEnterDawPresetLive));

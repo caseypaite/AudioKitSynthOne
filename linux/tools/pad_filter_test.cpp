@@ -116,11 +116,12 @@ int main() {
         s1::Engine engine; // never started -- setDeviceDefaultCc/Engine
                            // accessors used here all guard on mKernel
         s1::PadFilter padFilter;
+        s1::CcFilter ccFilter;
         auto driver = s1::ctrldev::makeAkaiMpkMiniMk3();
 
         // nullptr MidiOutput: init() won't call sendQuery() itself, so this
         // drives discovery entirely through a hand-built onSysEx() reply.
-        driver->init(engine, /*midiOut=*/nullptr, /*allowConfigure=*/false, padFilter);
+        driver->init(engine, /*midiOut=*/nullptr, /*allowConfigure=*/false, padFilter, ccFilter);
 
         const uint8_t padNotes[8] = {40, 41, 42, 43, 44, 45, 46, 47};
         const std::vector<uint8_t> reply = buildSyntheticReply(padNotes);

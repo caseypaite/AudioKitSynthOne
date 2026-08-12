@@ -19,14 +19,17 @@
 //  Every one of this device's buttons (SOLO/MUTE/REC x8, transport Play/
 //  Stop/Record/Rewind/Fast-Forward/Cycle, track left/right, marker set/
 //  left/right) is also a plain Control Change, not a Note -- Zynthian's own
-//  `midi_event()` has no note-on/off branch at all for this device. Unlike
-//  every Note-based transport button this port claims elsewhere (the Akai
-//  APC/MIDI Mix drivers, Arturia KeyLab 61, Novation Launchpad Pro mk2),
-//  `PadFilter`/`onPadButton()` only ever intercepts Notes -- there is no
-//  `onCC()`/`onControlChange()` hook in `ControllerDriver` at all (see
-//  AkaiMpk249.cpp's file header, which first documents this limitation), so
-//  none of this device's buttons can be turned into a function pad. They're
-//  left unbound rather than half-implemented.
+//  `midi_event()` has no note-on/off branch at all for this device, so
+//  `PadFilter`/`onPadButton()` (Note-only) can't reach any of them. Play
+//  (CC 41), Stop (CC 42) and Record (CC 45) ARE claimed via CcFilter and
+//  handled in onCC() -- panic / arp on-off / arp<->sequencer mode, the same
+//  3-function transport mapping this port's Note-based transport buttons use
+//  elsewhere (e.g. the Akai APC drivers). Channel is unconfirmed for the
+//  input side (Zynthian's own `midi_event()` never extracts or checks a
+//  channel for any CC on this device), so this claims on any channel, the
+//  same degrade-safely default the rest of this port's drivers use. The
+//  SOLO/MUTE/REC x8 and navigation buttons remain unbound -- see below for
+//  why.
 //
 //  Protocol facts below are transcribed from Zynthian's shipped driver
 //  (zyngine/ctrldev/zynthian_ctrldev_korg_nanokontrol2.py on the vangelis
@@ -44,6 +47,14 @@
 //  "never hijack CC1/CC64" hazard the developer guide warns about, just
 //  arrived at via a confirmed fact instead of a guess. Fader 2 is left
 //  unbound; the other 7 faders and all 8 knobs are unaffected.
+//
+//  The 24 SOLO/MUTE/REC buttons and the track/marker navigation buttons stay
+//  unbound even though onCC() could technically reach them now: Zynthian's
+//  own driver treats them as per-mixer-channel solo/mute/record-arm state (7
+//  channel strips + master), the same Zynthian chain-mixer concept with no
+//  Synth One equivalent that leaves the Akai MPK249's 24 switch CCs unbound
+//  too (see AkaiMpk249.cpp's file header) -- there's no honest single-
+//  parameter target for "solo channel 4," so nothing is invented.
 //
 
 #include "KorgNanoKontrol2.h"
@@ -80,6 +91,12 @@ constexpr S1Parameter kKnobTarget[kStripCount] = {
     morph1Volume, morph2Volume, morph2Detuning, subVolume,
     fmAmount, noiseVolume, glide, morphBalance};
 
+// -- Confirmed fixed transport CCs (channel unconfirmed -- see the file
+// header) --
+constexpr int kCcPlay   = 41;
+constexpr int kCcStop   = 42;
+constexpr int kCcRecord = 45;
+
 class KorgNanoKontrol2 : public ControllerDriver {
 public:
     std::vector<std::string> deviceNameHints() const override {
@@ -93,7 +110,8 @@ public:
     const char *driverName() const override { return "korg-nanokontrol2"; }
 
     void init(Engine &engine, MidiOutput *midiOut, bool allowConfigure,
-             PadFilter &padFilter) override {
+             PadFilter &padFilter, CcFilter &ccFilter) override {
+        mEngine = &engine;
         (void)midiOut;        // no SysEx TX needed -- this device has none
                               // worth speaking, see the file header
         (void)allowConfigure; // nothing to configure -- fixed CCs, no writable state
@@ -106,7 +124,35 @@ public:
             }
             engine.setDeviceDefaultCc(kKnobCc[i], kKnobTarget[i]);
         }
+
+        ccFilter.claimCc(kCcPlay);
+        ccFilter.claimCc(kCcStop);
+        ccFilter.claimCc(kCcRecord);
     }
+
+    /// The 3 claimed transport CCs, handled entirely internally via Engine&
+    /// -- mirrors the Akai APC drivers' Note-based transport buttons, just
+    /// reached via onCC() instead of onPadButton(). Acts only when the CC
+    /// value is non-zero; Zynthian's own driver never reads these as input
+    /// beyond that (they're mostly used there for LED feedback, an output
+    /// concern this framework has no equivalent for).
+    void onCC(int channel, int cc, int value) override {
+        (void)channel; // claimed with a wildcard channel -- see the file header
+        if (value <= 0 || mEngine == nullptr) return;
+        if (cc == kCcStop) {
+            mEngine->panic();
+        } else if (cc == kCcPlay) {
+            mEngine->setParameter(
+                arpIsOn, mEngine->getParameter(arpIsOn) != 0.0f ? 0.0f : 1.0f);
+        } else if (cc == kCcRecord) {
+            mEngine->setParameter(
+                arpIsSequencer,
+                mEngine->getParameter(arpIsSequencer) != 0.0f ? 0.0f : 1.0f);
+        }
+    }
+
+private:
+    Engine *mEngine = nullptr;
 };
 
 } // namespace

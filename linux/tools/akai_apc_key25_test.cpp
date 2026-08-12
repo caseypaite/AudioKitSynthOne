@@ -36,9 +36,10 @@ int main() {
     s1::Engine engine; // never started -- setDeviceDefaultCc/Engine accessors
                        // used here all guard on mKernel
     s1::PadFilter padFilter;
+    s1::CcFilter ccFilter;
     auto driver = s1::ctrldev::makeAkaiApcKey25();
 
-    driver->init(engine, /*midiOut=*/nullptr, /*allowConfigure=*/false, padFilter);
+    driver->init(engine, /*midiOut=*/nullptr, /*allowConfigure=*/false, padFilter, ccFilter);
 
     // -- Fixed CC defaults, no SysEx round trip needed -------------------
     check(engine.deviceDefaultForCc(0x30) == cutoff, "knob 1 (CC 0x30) seeds cutoff");
