@@ -54,6 +54,8 @@ per-channel mixer for them to control), and the Rewind/Fast-Forward/Loop
 transport buttons (no Synth One equivalent action). The keybed and 16 pads
 play as plain notes.
 
+![Akai MPK249 with the K1-K8 knobs, F1-F8 faders, and STOP/PLAY/REC annotated](images/annotated/akai-mpk249-annotated.png)
+
 ## Where this shows up in the app
 
 Bank A (cutoff, resonance, master volume) lands on **MAIN**; Bank A's

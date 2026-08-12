@@ -77,23 +77,35 @@ The remaining 8 pads play notes normally. These 8 function pads are
 rediscovered every time you switch **PROG SELECT**, so they work the same way
 on every slot, including the undesigned ones.
 
+![Akai MPK Mini mk3 with the top-row transport pads, bottom-row panel-switch pads, and K1-K8 knobs annotated](../images/mpk-mini-mk3-annotated.png)
+
+Switching modes with **PROG SELECT**:
+
+![Akai MPK Mini mk3 with the PROG SELECT button and PAD CONTROLS row highlighted](../images/mpk-progselect-annotated.png)
+
 ## Where this shows up in the app
 
 Mode 0's K1/K2/K8 land on **MAIN** (cutoff, resonance, master volume), K3/K4
-on **ENV** (amplitude attack/release), K5/K6/K7 on **FX** (LFO 1 rate,
-reverb mix, delay mix):
+on **ENV** (amplitude attack/release):
 
-![MAIN panel with cutoff, resonance and master volume knobs, and FX panel with LFO/reverb/delay controls](images/app/main.png)
+![MAIN and ENV panels with K1, K2, K3, K4 and K8 marked next to the knobs they control](../images/app-main-env-annotated.png)
 
-![ENV panel with the amplitude ADSR](images/app/env.png)
+K5/K6/K7 land on the **FX** panel (LFO 1 rate, reverb mix, delay mix):
+
+![FX panel with K5, K6 and K7 marked next to the knobs they control](../images/app-fx-annotated.png)
 
 Modes 1-3 each land entirely on one panel -- oscillators/voice on MAIN,
-envelope depth on ENV, modulation/FX on FX, matching the screenshots above.
+envelope depth on ENV, modulation/FX on FX:
+
+![MAIN panel with K1-K8 marked next to the Mode 1 knobs they control](../images/app-mode1-oscillators.png)
+
+![ENV panel with K1-K8 marked next to the Mode 2 knobs they control](../images/app-mode2-envelope.png)
+
+![FX panel with K1-K8 marked next to the Mode 3 knobs they control](../images/app-mode3-modulation.png)
 
 The top-row transport pads (Panic, All notes off, Arp/Seq toggle) act
-globally, not on a specific panel -- Panic mirrors the PANIC button visible
-in the lower-left of every panel screenshot. The bottom-row panel-switch pads
-jump directly to MAIN/ENV/FX/SEQ in `synthone-gui`.
+globally, not on a specific panel. The bottom-row panel-switch pads jump
+directly to MAIN/ENV/FX/SEQ in `synthone-gui`.
 
 ## Troubleshooting
 

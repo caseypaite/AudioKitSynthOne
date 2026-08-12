@@ -41,6 +41,8 @@ soft keys under the grid, the 8 track-select buttons above the knobs, and
 SHIFT are likewise left alone; bind any of them yourself with MIDI Learn if
 you want to use them.
 
+![Akai APC Key 25 mk2 with the 8 knobs and STOP ALL CLIPS/PLAY/RECORD annotated](images/annotated/akai-apc-key25-mk2-annotated.png)
+
 ## Where this shows up in the app
 
 Cutoff and resonance land on **MAIN**, master volume also on **MAIN**;

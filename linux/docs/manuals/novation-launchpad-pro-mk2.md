@@ -34,6 +34,16 @@ don't need to do anything for this yourself. Look for:
 | PLAY | Arp/Seq on-off |
 | RECORD | Switch between Arp mode and Sequencer mode |
 
+*No annotated diagram for this device*: STOP/PLAY/RECORD are the note
+numbers this device reports **after** switching into DAW mode, and this
+project can't confidently match those 3 note numbers back to specific
+silkscreened buttons on a stock-firmware product photo (the Session/Note/
+Device/User-mode labels visible on the photo are the *pre-DAW-mode*
+button names, and Novation doesn't publish which physical button they
+remap to once DAW mode is entered). Guessing at a box here risked being
+actively wrong rather than just incomplete, which is worse -- see the
+developer guide's "Known gaps" section.
+
 That's the entire mapping. The 8x8 clip-launch grid plays as plain notes,
 same as the rest of the Launchpad family. No knobs exist on this device to
 map, and everything else on the control surface (Session/Note/Device/User

@@ -55,6 +55,13 @@ That's the entire mapping, and it's correct as designed, not incomplete:
 The keys/pads play as plain notes, same as any other keybed in this port.
 Bind anything else yourself with MIDI Learn.
 
+*No annotated diagram for this device*: Teenage Engineering's own press
+photography for the OP-1 is uniformly shot at dramatic angles (see the photo
+above), never a plain top-down frontal shot, so there isn't a source image
+this project could draw accurate, non-misleading boxes on. PLAY and REC are
+small icon buttons near the top-left of the unit; consult your own OP-1 or
+its manual to locate them precisely.
+
 ## Where this shows up in the app
 
 PLAY/REC are global transport actions, not tied to a specific panel -- the

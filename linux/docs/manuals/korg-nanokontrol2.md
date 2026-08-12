@@ -39,6 +39,8 @@ Not mapped: the SOLO/MUTE/REC button rows and track/marker navigation
 buttons -- these are per-mixer-channel controls on this driver's Zynthian
 reference design, with no Synth One equivalent for them to control.
 
+![Korg nanoKONTROL2 with the 8 knobs, 8 faders and PLAY/STOP/RECORD annotated](images/annotated/korg-nanokontrol2-annotated.png)
+
 ## Where this shows up in the app
 
 The 8 knobs (oscillators/voice/glide/balance) land entirely on **MAIN**.

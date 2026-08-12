@@ -38,6 +38,8 @@ Not mapped either: navigation (track left/right, up/down) and per-channel
 chain buttons (select/mute/solo) -- no Synth One equivalent action for
 either. The keybed and 16 pads play as plain notes.
 
+![Novation Launchkey Mini MK4 37 with PLAY/RECORD annotated](images/annotated/novation-launchkey-mini-mk4-37-annotated.png)
+
 ## Where this shows up in the app
 
 Only PLAY/RECORD do anything by default, and both are global transport

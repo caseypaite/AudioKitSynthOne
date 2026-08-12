@@ -44,6 +44,8 @@ SAVE/PUNCH IN/PUNCH OUT/UNDO/NEXT/PREVIOUS/BANK, and the preset +/- buttons
 -- none has a Synth One equivalent. The keybed and the 4x4 pad grid play as
 plain notes.
 
+![Arturia KeyLab mkII 61 with the STOP/PLAY/REC transport buttons annotated](images/annotated/arturia-keylab-61-mk2-annotated.png)
+
 ## Where this shows up in the app
 
 STOP/PLAY-PAUSE/RECORD/METRONOME are global transport actions, not tied to a

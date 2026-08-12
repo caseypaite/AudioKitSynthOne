@@ -62,3 +62,18 @@ find your way around a physical control surface, not as marketing material
 -- none of these manufacturers endorse or are affiliated with this project.
 The [WORLDE MINI manual](worlde-mini.md) in particular uses an unconfirmed
 visual stand-in; see its caption for why.
+
+## A note on the annotated diagrams
+
+11 of the 20 manuals additionally include a hand-annotated diagram (colored
+boxes + a legend, in the same style as the Akai MPK Mini mk3 reference
+diagrams in the [developer guide](../midi-controller-developer-guide.md))
+marking exactly which physical knob/fader/button maps to what. The other 9
+don't, for one of three reasons, each stated explicitly in that manual: the
+device maps nothing at all (4 of the 5 Launchpads), the only available
+photo is too low-resolution or too ambiguous a match to annotate accurately
+and honestly (Behringer MOTÖR, WORLDE MINI), or this project can't
+confidently identify which physical button corresponds to a given mapped
+function from the photo alone (Launchpad Pro mk2, Teenage Engineering OP-1).
+A wrong box would be worse than no box; the mapping table in each manual is
+always the authoritative reference regardless of whether a diagram exists.

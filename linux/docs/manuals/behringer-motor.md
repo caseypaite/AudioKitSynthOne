@@ -51,6 +51,12 @@ The other 28 pads (the rest of Bank A plus Banks B/C/D) play as plain notes
 sensing plays as plain (very low, inaudible-range) notes too; this driver
 has no use for it.
 
+*No annotated diagram for this device*: the only available product photo is
+a small (600x254px) retailer listing image, too low-resolution to draw
+individual, confidently-accurate boxes around 25 faders/encoders across 3
+banks plus 4 specific pads out of 32. The mapping table above is the
+authoritative reference; the photo is included for general orientation only.
+
 ## Where this shows up in the app
 
 Upper-bank faders (cutoff/resonance/master volume on **MAIN**,

@@ -49,6 +49,13 @@ The other 4 pads, the keybed, and the second CC-based pad bank play/pass
 through normally. No knobs or faders are mapped -- none are documented for
 this device, so bind them yourself with MIDI Learn if you want to use them.
 
+*No annotated diagram for this device*: as the photo caption above explains,
+this project doesn't have a confirmed-correct photo of the exact unit this
+driver targets, so drawing boxes around specific pads on a *possibly*
+different sibling device's silkscreen would manufacture a false sense of
+precision. The pad numbering in the table above (1st-4th, left to right) is
+the reliable reference.
+
 ## Where this shows up in the app
 
 The 4 claimed transport pads act globally, not tied to a specific panel --

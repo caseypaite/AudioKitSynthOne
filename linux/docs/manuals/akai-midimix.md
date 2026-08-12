@@ -43,6 +43,8 @@ this device has no keybed, and Synth One has no per-channel mixer concept
 for them to control, so they're left alone rather than repurposed into
 something arbitrary.
 
+![Akai MIDI Mix with the 3 knob rows, 8 channel faders, master fader, SOLO and BANK LEFT/RIGHT annotated](images/annotated/akai-midimix-annotated.png)
+
 ## Where this shows up in the app
 
 Knob row 1 (oscillators/voice) lands entirely on **MAIN**; knob row 2

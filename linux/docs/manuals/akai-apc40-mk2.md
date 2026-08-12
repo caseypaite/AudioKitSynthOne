@@ -43,6 +43,8 @@ for something. The 40-pad clip-launch grid, the 5 per-track buttons (Record
 Arm/Solo/Activator/Track Selection/Track Stop), and everything else not
 listed above play as plain notes.
 
+![Akai APC40 mk2 with the Track Control knobs, Device Control knobs, 8 channel faders, master fader, crossfader and STOP ALL CLIPS/PLAY/RECORD annotated](images/annotated/akai-apc40-mk2-annotated.png)
+
 ## Where this shows up in the app
 
 Device Control knobs (filter/amp envelope) land on **ENV**; Track Control

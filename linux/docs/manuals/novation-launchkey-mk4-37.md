@@ -39,6 +39,8 @@ Not mapped: navigation (track left/right, up/down) and per-channel chain
 buttons (select/mute/solo) -- no Synth One equivalent action for either. The
 keybed and 16 pads play as plain notes.
 
+![Novation Launchkey MK4 37 with the 8 knobs and PLAY/RECORD annotated](images/annotated/novation-launchkey-mk4-37-annotated.png)
+
 ## Where this shows up in the app
 
 All 8 knobs (the filter envelope, amp decay/sustain, envelope pitch

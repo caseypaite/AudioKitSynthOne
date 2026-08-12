@@ -38,6 +38,8 @@ Not mapped: navigation (track left/right, up/down) and per-channel chain
 buttons (select/mute/solo) -- no Synth One equivalent action for either. The
 keybed and 16 pads play as plain notes.
 
+![Novation Launchkey Mini mk3 with the 8 knobs and PLAY/RECORD annotated](images/annotated/novation-launchkey-mini-mk3-annotated.png)
+
 ## Where this shows up in the app
 
 Cutoff/resonance/master volume land on **MAIN**; attack/release on **ENV**;

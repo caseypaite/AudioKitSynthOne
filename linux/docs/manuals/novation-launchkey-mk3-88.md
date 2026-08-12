@@ -40,6 +40,8 @@ Not mapped: navigation (track left/right, up/down) and per-channel chain
 buttons (select/mute/solo) -- no Synth One equivalent action for either. The
 keybed and 16 pads play as plain notes.
 
+![Novation Launchkey MK3 88 with the 8 knobs, 8 faders, master fader and transport button cluster annotated](images/annotated/novation-launchkey-mk3-88-annotated.png)
+
 ## Where this shows up in the app
 
 The 8 knobs (oscillators/voice/glide/balance) land entirely on **MAIN**.
