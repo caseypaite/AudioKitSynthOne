@@ -78,7 +78,7 @@ void CALLBACK midiCallback(HMIDIIN handle, UINT message, DWORD_PTR instance,
         return;
     }
     if (message != MIM_DATA) return;
-    self->enqueuePacked(static_cast<uint32_t>(param1));
+    self->enqueuePacked(static_cast<uint32_t>(param1), reinterpret_cast<void *>(handle));
 }
 
 } // namespace
@@ -108,7 +108,7 @@ MidiInput::~MidiInput() {
     mSysExHeaderOwners.clear();
 }
 
-void MidiInput::enqueuePacked(uint32_t packed) {
+void MidiInput::enqueuePacked(uint32_t packed, void *handle) {
     // dwParam1 packs the short message low byte first: status, data1, data2.
     const uint8_t status = static_cast<uint8_t>(packed & 0xFF);
 
@@ -128,6 +128,23 @@ void MidiInput::enqueuePacked(uint32_t packed) {
     m.length = (kind == 0xC0 || kind == 0xD0) ? 2 : 3;
 
     if (mQueue != nullptr) mQueue->push(m);
+
+    // Program Change additionally feeds a controller driver's mode-switch
+    // detection (see ControllerDriverManager::dispatchProgramChange), on a
+    // separate queue dispatched from the control thread -- the push above,
+    // onto the render-thread-facing MidiQueue, is unrelated and unchanged.
+    if (kind == 0xC0 && mProgramChangeQueue != nullptr) {
+        ProgramChangeMessage pc;
+        pc.channel = status & 0x0F;
+        pc.program = m.data[1] & 0x7F;
+        for (size_t i = 0; i < mHandles.size(); ++i) {
+            if (mHandles[i] == handle) {
+                pc.sourceId = mConnected[i].client;
+                break;
+            }
+        }
+        mProgramChangeQueue->push(pc);
+    }
 }
 
 void MidiInput::enqueueSysExFragment(void *hdr, void *handle) {
@@ -251,12 +268,14 @@ std::vector<MidiSource> MidiInput::listSources() {
     return sources;
 }
 
-void MidiInput::start(MidiQueue *queue, SysExQueue *sysexQueue) {
+void MidiInput::start(MidiQueue *queue, SysExQueue *sysexQueue,
+                      ProgramChangeQueue *programChangeQueue) {
     if (mHandles.empty() || mRunning.load()) return;
 
     // Publish the queues before the callbacks can fire.
     mQueue = queue;
     mSysExQueue = sysexQueue;
+    mProgramChangeQueue = programChangeQueue;
     mRunning.store(true);
     for (void *handle : mHandles) {
         postSysExBuffers(static_cast<HMIDIIN>(handle), mSysExHeaders, mSysExHeaderOwners);

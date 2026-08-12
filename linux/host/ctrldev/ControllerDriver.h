@@ -53,6 +53,14 @@ public:
     /// A complete SysEx message addressed to this device's input arrived.
     /// Default: ignore.
     virtual void onSysEx(const uint8_t *data, size_t length) { (void)data; (void)length; }
+
+    /// A Program Change message addressed to this device's input arrived --
+    /// the hook for a hardware-native "mode"/bank switch (e.g. the Akai MPK
+    /// Mini mk3's PROG SELECT button choosing a different onboard program).
+    /// A driver that supports modes typically responds by clearing and
+    /// re-seeding Engine's device-default CC map for the new mode's targets
+    /// (see Engine::clearDeviceDefaults/setDeviceDefaultCc). Default: ignore.
+    virtual void onProgramChange(int program) { (void)program; }
 };
 
 } // namespace ctrldev

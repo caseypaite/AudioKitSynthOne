@@ -10,6 +10,18 @@
 //  parameter targets (Engine::setDeviceDefaultCc), discovered by querying the
 //  device's own currently-stored program over SysEx.
 //
+//  Modes: the device's PAD CONTROLS row has a PROG SELECT button, a factory,
+//  no-reprogramming-required way to switch between up to 9 onboard "program"
+//  slots (0 = RAM/current, 1-8 = stored). Selecting one is expected to send a
+//  MIDI Program Change (this is the same mechanism Zynthian's own driver
+//  relies on for its mode switching). This driver treats each program number
+//  as a distinct knob-mapping "mode": onProgramChange() clears the current
+//  knob defaults and re-queries that slot's actual CC assignments, so the
+//  same 8 physical knobs can reach more than 8 parameters by switching
+//  programs on the device. Modes 0-3 have a designed target set below; any
+//  other slot just clears the knob defaults and leaves them unbound (no
+//  guessing at a target set that was never designed).
+//
 //  SysEx protocol byte layout below is transcribed from Zynthian's shipped
 //  driver (zyngine/ctrldev/zynthian_ctrldev_akai_mpk_mini_mk3.py on the
 //  vangelis branch of zynthian/zynthian-ui), itself sourced from
@@ -18,7 +30,11 @@
 //  validated against physical MPK Mini mk3 hardware in this project's
 //  development environment; the defensive checks below (exact reply length,
 //  command byte, sane mode/CC values) are there so a wrong assumption
-//  degrades to "seed nothing" rather than a bad mapping.
+//  degrades to "seed nothing" rather than a bad mapping. The Program
+//  Change-driven mode switch described above is likewise unverified against
+//  real hardware -- it's the documented, Zynthian-precedented mechanism, not
+//  a guess, but "the device sends PC on PROG SELECT" hasn't been confirmed
+//  here.
 //
 
 #include "AkaiMpkMiniMk3.h"
@@ -54,16 +70,31 @@ constexpr int kOffKnobs   = 91; // 8 knobs x 20 bytes: mode, CC, min, max, name[
 constexpr int kKnobStride = 20;
 constexpr int kKnobCount  = 8;
 
-/// The 8 knob targets. cutoff/resonance (filter), attack/release (amp
-/// envelope -- not the independent filter envelope), one modulation rate,
-/// two FX sends, and master level: broad coverage across the synth with no
-/// redundancy, and none of them collide with universally-reserved CCs (mod
-/// wheel CC1, sustain CC64) since these are only ever bound to whatever CC
-/// the device's own query reply reports its knobs are actually sending, not
-/// a hardcoded guess.
-constexpr S1Parameter kKnobTargets[kKnobCount] = {
-    cutoff, resonance, attackDuration, releaseDuration,
-    lfo1Rate, reverbMix, delayMix, masterVolume,
+constexpr int kModeCount = 4;
+
+/// One row of 8 knob targets per mode, selected by the device's onboard
+/// program number (see the file header comment). None of these collide with
+/// universally-reserved CCs (mod wheel CC1, sustain CC64) since a target is
+/// only ever bound to whatever CC the device's own query reply reports a
+/// knob is actually sending, never a hardcoded guess.
+constexpr S1Parameter kModeTargets[kModeCount][kKnobCount] = {
+    // Mode 0 (program 0, RAM/default): sound -- filter, amp envelope, one
+    // modulation rate, two FX sends, master level.
+    {cutoff, resonance, attackDuration, releaseDuration,
+     lfo1Rate, reverbMix, delayMix, masterVolume},
+    // Mode 1 (program 1): oscillators/voice -- the sound-shaping half Mode 0
+    // doesn't reach.
+    {morph1Volume, morph2Volume, morph2Detuning, subVolume,
+     fmAmount, noiseVolume, glide, morphBalance},
+    // Mode 2 (program 2): filter envelope depth -- the independent envelope
+    // from Mode 0's amp envelope, plus how hard the LFOs hit filter cutoff
+    // and resonance and how much the envelope tracks pitch.
+    {filterAttackDuration, filterDecayDuration, filterSustainLevel, filterReleaseDuration,
+     filterADSRMix, cutoffLFO, resonanceLFO, adsrPitchTracking},
+    // Mode 3 (program 3): modulation/FX depth -- LFO1 depth, LFO2 rate/depth,
+    // phaser, autopan, bitcrush.
+    {lfo1Amplitude, lfo2Rate, lfo2Amplitude, phaserMix,
+     phaserRate, autoPanAmount, autoPanFrequency, bitCrushSampleRate},
 };
 
 class AkaiMpkMiniMk3 : public ControllerDriver {
@@ -92,6 +123,7 @@ public:
         // universally-reserved CC (e.g. CC1 is the mod wheel). If the query
         // below never completes, the knobs simply stay unbound until the
         // user does their own MIDI Learn -- safe degradation over a guess.
+        mCurrentMode = 0;
         if (midiOut != nullptr && midiOut->isConnected()) {
             sendQuery(0); // program slot 0 = RAM/current
         }
@@ -112,6 +144,30 @@ public:
         parseKnobs(body, kFullBodyLength);
     }
 
+    void onProgramChange(int program) override {
+        if (mEngine == nullptr) return;
+
+        // Whatever the previous mode had bound, it no longer applies -- the
+        // physical knobs are about to mean something else (or, for an
+        // undesigned slot below, nothing at all). Clearing first means a
+        // query that never completes leaves the knobs safely unbound rather
+        // than silently keeping the old mode's mapping under the new one.
+        mEngine->clearDeviceDefaults();
+
+        if (program < 0 || program >= kModeCount) {
+            // No designed target set for this slot -- stay cleared rather
+            // than guess. mCurrentMode is left as-is so a stray reply from
+            // an in-flight query for the *previous* mode can't be
+            // misattributed to this one; see parseKnobs()'s bounds check.
+            return;
+        }
+
+        mCurrentMode = program;
+        if (mMidiOut != nullptr && mMidiOut->isConnected()) {
+            sendQuery(program);
+        }
+    }
+
 private:
     void sendQuery(int program) {
         const uint8_t msg[] = {0xF0,
@@ -128,11 +184,14 @@ private:
 
     /// Reads the 8 knob blocks from a confirmed-length, confirmed-envelope
     /// reply and seeds Engine's device-default CC map from whatever CC each
-    /// one is actually assigned to right now. Bails without seeding anything
-    /// if a block doesn't look plausible (mode > 1 or CC > 127) -- a
-    /// malformed reply degrades to "nothing seeded", never a bad mapping.
+    /// one is actually assigned to right now, using the target set for
+    /// whichever mode was active when the query that prompted this reply was
+    /// sent. Bails without seeding anything if a block doesn't look
+    /// plausible (mode > 1 or CC > 127) -- a malformed reply degrades to
+    /// "nothing seeded", never a bad mapping.
     void parseKnobs(const uint8_t *body, int bodyLength) {
         if (kOffKnobs + kKnobCount * kKnobStride > bodyLength) return;
+        if (mCurrentMode < 0 || mCurrentMode >= kModeCount) return; // no target set for this mode
 
         int ccs[kKnobCount];
         for (int k = 0; k < kKnobCount; ++k) {
@@ -143,7 +202,7 @@ private:
             ccs[k] = cc;
         }
         for (int k = 0; k < kKnobCount; ++k) {
-            mEngine->setDeviceDefaultCc(ccs[k], kKnobTargets[k]);
+            mEngine->setDeviceDefaultCc(ccs[k], kModeTargets[mCurrentMode][k]);
         }
     }
 
@@ -175,6 +234,11 @@ private:
     Engine     *mEngine = nullptr;
     MidiOutput *mMidiOut = nullptr;
     bool        mAllowConfigure = false;
+    // The onboard program number a pending/completed knob query applies to;
+    // indexes kModeTargets. Set before sendQuery() so a reply arriving in
+    // onSysEx() knows which target set to seed. See onProgramChange() and
+    // parseKnobs().
+    int mCurrentMode = 0;
 };
 
 } // namespace

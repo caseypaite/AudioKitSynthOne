@@ -329,6 +329,7 @@ int main(int argc, char **argv) {
 
     s1::MidiQueue midiQueue;
     s1::SysExQueue sysexQueue;
+    s1::ProgramChangeQueue programChangeQueue;
     s1::MidiInput midi;
     std::string midiStatus;
     if (!midi.open("SynthOne", error)) {
@@ -341,7 +342,7 @@ int main(int argc, char **argv) {
             midiStatus = midi.portName() +
                          (midiSpec == "all" ? " <- all sources" : " <- " + midiSpec);
         }
-        midi.start(&midiQueue, &sysexQueue);
+        midi.start(&midiQueue, &sysexQueue, &programChangeQueue);
     }
 
     s1::ctrldev::ControllerDriverManager driverManager;
@@ -445,6 +446,9 @@ int main(int argc, char **argv) {
 
         s1::SysExMessage sysexMsg;
         while (sysexQueue.pop(sysexMsg)) driverManager.dispatchSysEx(sysexMsg);
+
+        s1::ProgramChangeMessage pcMsg;
+        while (programChangeQueue.pop(pcMsg)) driverManager.dispatchProgramChange(pcMsg);
 
         if (testNote >= 0) {
             // 1 s on, 0.5 s off, at the 50 ms tick below.

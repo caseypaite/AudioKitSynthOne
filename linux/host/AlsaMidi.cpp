@@ -143,10 +143,12 @@ std::vector<MidiSource> MidiInput::listSources() {
     return sources;
 }
 
-void MidiInput::start(MidiQueue *queue, SysExQueue *sysexQueue) {
+void MidiInput::start(MidiQueue *queue, SysExQueue *sysexQueue,
+                      ProgramChangeQueue *programChangeQueue) {
     if (mSeq == nullptr || mRunning.load()) return;
     mQueue = queue;
     mSysExQueue = sysexQueue;
+    mProgramChangeQueue = programChangeQueue;
     mRunning.store(true);
     mThread = std::thread(&MidiInput::run, this);
 }
@@ -212,6 +214,21 @@ void MidiInput::run() {
                     if (bytes != nullptr && mSysExAssembler.append(bytes, len, sysex)) {
                         sysex.sourceId = event->source.client;
                         if (mSysExQueue != nullptr) mSysExQueue->push(sysex);
+                    }
+                    break;
+                }
+                case SND_SEQ_EVENT_PGMCHANGE: {
+                    // Not forwarded to the note/CC path -- Program Change was
+                    // previously dropped entirely on Linux (no case here at
+                    // all), and stays that way; this only feeds a controller
+                    // driver's mode-switch detection (see
+                    // ControllerDriverManager::dispatchProgramChange).
+                    if (mProgramChangeQueue != nullptr) {
+                        ProgramChangeMessage pc;
+                        pc.channel = event->data.control.channel & 0x0F;
+                        pc.program = event->data.control.value & 0x7F;
+                        pc.sourceId = event->source.client;
+                        mProgramChangeQueue->push(pc);
                     }
                     break;
                 }

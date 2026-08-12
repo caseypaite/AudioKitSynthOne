@@ -19,7 +19,7 @@ as expected.
 
 | Controller | Driver name | What it does |
 | --- | --- | --- |
-| Akai MPK Mini mk3 | `akai-mpk-mini-mk3` | Maps the 8 knobs to cutoff, resonance, attack, release, LFO 1 rate, reverb mix, delay mix and master volume. Pads and keys play notes normally, no special handling. |
+| Akai MPK Mini mk3 | `akai-mpk-mini-mk3` | Maps the 8 knobs to synth parameters across 4 switchable modes (32 parameters reachable in total -- see [Switching modes](#switching-modes)). Pads and keys play notes normally, no special handling. |
 
 Don't see your controller? It still works as a plain MIDI keyboard/controller
 -- see [Using it with an unsupported controller](#using-it-with-an-unsupported-controller)
@@ -80,8 +80,36 @@ have picked (mostly useful for testing):
    at a mapping; a wrong guess risks reassigning a knob to something that
    collides with a universal MIDI convention (e.g. the mod wheel is always
    CC 1), so the driver would rather do nothing than do something wrong.
+5. **Switching the device's onboard program re-runs the same discovery** for
+   a different set of 8 targets -- see [Switching modes](#switching-modes).
 
-### Where each knob shows up in the app
+## Switching modes
+
+The 8 knobs can reach more than 8 parameters: the MPK Mini mk3's **PROG
+SELECT** button (in the PAD CONTROLS row, alongside BANK A/B, CC and PROG
+CHANGE) switches between the device's onboard program slots without any
+reprogramming, and the driver treats each slot as a different knob mapping,
+re-running the same SysEx discovery for that slot's actual CC assignments.
+
+| Program slot | Mode | Knobs 1-8 |
+| --- | --- | --- |
+| 0 (RAM/default) | Sound | Cutoff, Resonance, Attack, Release, LFO 1 rate, Reverb mix, Delay mix, Master volume |
+| 1 | Oscillators/voice | OSC1 volume, OSC2 volume, OSC2 detune, Sub volume, FM amount, Noise volume, Glide, OSC1/2 balance |
+| 2 | Filter envelope | Filter attack, Filter decay, Filter sustain, Filter release, Filter/amp env mix, Cutoff LFO amount, Resonance LFO amount, Envelope pitch tracking |
+| 3 | Modulation/FX | LFO 1 amount, LFO 2 rate, LFO 2 amount, Phaser mix, Phaser rate, Autopan amount, Autopan rate, Bitcrush rate |
+
+Consult your MPK Mini mk3's manual for exactly how to reach PROG SELECT +
+a program number on your unit (this varies slightly by firmware). Slots 4-8
+have no assigned mode -- switching to one just leaves the knobs unbound
+until you switch back or MIDI-Learn them yourself.
+
+Mode switching depends on the device actually sending a MIDI Program Change
+when you use PROG SELECT -- this is the standard, documented mechanism (the
+same one Zynthian's own MPK driver relies on), but hasn't been confirmed
+against physical hardware in this project's own testing. If switching
+modes doesn't do anything, see [Troubleshooting](#troubleshooting).
+
+### Where each knob shows up in the app (Mode 0)
 
 K1/K2/K8 land on the **MAIN** panel (cutoff, resonance, master volume), K3/K4
 on the **ENV** panel (amplitude attack/release):
@@ -92,9 +120,13 @@ K5/K6/K7 land on the **FX** panel (LFO 1 rate, reverb mix, delay mix):
 
 ![FX panel with K5, K6 and K7 marked next to the knobs they control](images/app-fx-annotated.png)
 
-If you ever forget which physical knob drives which on-screen control, this
-is the reference to come back to -- the same 8 targets regardless of which
-panels happen to be showing when you're playing.
+If you ever forget which physical knob drives which on-screen control in
+Mode 0, this is the reference to come back to. Modes 1-3 aren't
+screenshotted here yet -- use the table in
+[Switching modes](#switching-modes) as the reference for those; their
+targets live on the MAIN panel (oscillators/voice), the ENV panel's FILTER
+column (filter envelope), and the FX panel (LFO2/phaser/autopan/bitcrush)
+respectively.
 
 ## How this interacts with MIDI Learn
 
@@ -149,6 +181,15 @@ The query may not have gotten a reply in time, or the device's SysEx
 program dump didn't parse as expected (this is a defensive check, not a
 bug report waiting to happen -- see the developer guide for why). Either
 way, MIDI-Learn the knob yourself as a reliable fallback.
+
+**Switching modes with PROG SELECT doesn't change what the knobs control.**
+The knobs should go briefly unresponsive and then pick up the new mode's
+mapping; if nothing changes at all, either the device isn't sending a
+Program Change on PROG SELECT the way this driver expects (unverified
+against real hardware -- see the developer guide), or you're on a slot
+without a designed mode (only 0-3 have one). Try slot 0 first to confirm
+the driver itself is working, then try 1-3. As always, MIDI Learn works
+regardless of mode switching.
 
 **No hotplug.** Controllers are matched once at startup against whatever's
 already connected when `synthone`/`synthone-gui` starts. Plugging a

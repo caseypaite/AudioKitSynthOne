@@ -447,12 +447,13 @@ int main(int argc, char **argv) {
 
     s1::MidiQueue midiQueue;
     s1::SysExQueue sysexQueue;
+    s1::ProgramChangeQueue programChangeQueue;
     s1::MidiInput midi;
     std::string midiStatus = "unavailable";
     if (midi.open("SynthOne", error)) {
         std::string ignored;
         midi.connect(midiSpec, ignored);
-        midi.start(&midiQueue, &sysexQueue);
+        midi.start(&midiQueue, &sysexQueue, &programChangeQueue);
         midiStatus = midi.portName();
     }
 
@@ -682,6 +683,9 @@ int main(int argc, char **argv) {
 
         s1::SysExMessage sysexMsg;
         while (sysexQueue.pop(sysexMsg)) driverManager.dispatchSysEx(sysexMsg);
+
+        s1::ProgramChangeMessage pcMsg;
+        while (programChangeQueue.pop(pcMsg)) driverManager.dispatchProgramChange(pcMsg);
 
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();

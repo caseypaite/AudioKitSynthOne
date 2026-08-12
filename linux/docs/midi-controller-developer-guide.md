@@ -35,20 +35,24 @@ purpose:
 ```
 ALSA seq / WinMM  --(raw bytes)-->  MidiInput reader thread
                                          |
-                        +----------------+----------------+
-                        |                                 |
-                 3-byte channel                    SysEx (0xF0..0xF7)
-                 messages -> MidiQueue          -> SysExAssembler -> SysExQueue
-                        |                                 |
-                 audio render callback           control-thread poll loop
-                 (host/main.cpp `render`         (`while (gRunning)` /
-                 lambda; JACK/PortAudio           `while (!glfwWindowShouldClose)`)
-                 callback thread)                          |
-                        |                        ControllerDriverManager::dispatchSysEx
-                 Engine::handleMidi                         |
-                 (mCcToParameter, then                driver->onSysEx(...)
-                  mDeviceDefaultCc fallback)                 |
-                                                    Engine::setDeviceDefaultCc(...)
+                    +--------------------+--------------------+
+                    |                    |                    |
+             3-byte channel       SysEx (0xF0..0xF7)    Program Change
+             messages ->      -> SysExAssembler      -> ProgramChangeQueue
+             MidiQueue            -> SysExQueue                |
+                    |                    |                    |
+             audio render         control-thread poll loop (both queues)
+             callback             (`while (gRunning)` /
+             (host/main.cpp        `while (!glfwWindowShouldClose)`)
+             `render` lambda;                |
+             JACK/PortAudio    ControllerDriverManager::dispatchSysEx
+             callback thread)  / dispatchProgramChange
+                    |                    |
+             Engine::handleMidi    driver->onSysEx(...) /
+             (mCcToParameter,      driver->onProgramChange(...)
+              then                          |
+              mDeviceDefaultCc     Engine::setDeviceDefaultCc(...) /
+              fallback)            clearDeviceDefaults()
 ```
 
 Two threads matter here, and they're isolated from each other on purpose:
@@ -60,11 +64,12 @@ Two threads matter here, and they're isolated from each other on purpose:
   (`std::vector`, `new`) -- and `SysExAssembler`/the WinMM buffer pool do.
 - **The audio render callback** only ever touches the small, fixed-size,
   lock-free `MidiQueue`/`mCcToParameter`/`mDeviceDefaultCc` structures via
-  `Engine::handleMidi()`. SysEx dispatch, driver matching, and everything a
-  driver itself does (including calling `Engine::setDeviceDefaultCc`) all
-  happen on the *control* thread instead -- the same ~50 ms poll loop that
-  already calls `engine.drainNotifications()`. **A driver must never be
-  called from the render thread**, and nothing in this framework does that.
+  `Engine::handleMidi()`. SysEx/Program Change dispatch, driver matching, and
+  everything a driver itself does (including calling
+  `Engine::setDeviceDefaultCc`) all happen on the *control* thread instead --
+  the same ~50 ms poll loop that already calls `engine.drainNotifications()`.
+  **A driver must never be called from the render thread**, and nothing in
+  this framework does that.
 
 ## SysEx transport (`host/MidiSysEx.h`)
 
@@ -140,6 +145,32 @@ higher-risk than the ALSA side until someone validates it on real hardware.
   -- the poll is the standard callback-free idiom for a synchronous SysEx
   send on WinMM.
 
+## Program Change transport (`host/MidiSysEx.h`)
+
+A driver's other input: `ProgramChangeMessage`/`ProgramChangeQueue`, added for
+mode switching (see below) and structurally identical to
+`SysExMessage`/`SysExQueue` -- a small SPSC ring (capacity 8) carrying
+`{channel, program, sourceId}` from the reader thread to the control thread.
+Kept separate from `MidiQueue` for the same reason SysEx is: driver dispatch
+happens on the control thread, not the render thread, so this message kind
+needs its own path off the hot note/CC ring regardless of how simple (2
+bytes) it is.
+
+Program Change was already reaching the existing `MidiQueue` on Windows (it's
+just another packed short message `enqueuePacked()` forwards, with
+`length == 2`) but was silently dropped on Linux (no `SND_SEQ_EVENT_PGMCHANGE`
+case existed in `AlsaMidi.cpp`'s `run()`). Both platforms now *additionally*
+push a copy onto `ProgramChangeQueue` when a controller driver wants it --
+the existing `MidiQueue` path (Windows-only, and `Engine::handleMidi()`
+falling through to `mKernel->handleMIDIEvent()` for it) is unchanged.
+
+- ALSA: `run()`'s switch gained `case SND_SEQ_EVENT_PGMCHANGE:`, reading
+  `event->data.control.channel`/`.value`.
+- WinMM: `enqueuePacked()` additionally checks `kind == 0xC0` and, if so,
+  resolves `sourceId` by scanning `mHandles` for the `HMIDIIN` the callback
+  fired on (same lookup pattern `enqueueSysExFragment()` already uses for the
+  SysEx path) before pushing.
+
 ## The driver interface (`host/ctrldev/ControllerDriver.h`)
 
 ```cpp
@@ -149,6 +180,7 @@ public:
     virtual const char *driverName() const = 0;
     virtual void init(Engine &engine, MidiOutput *midiOut, bool allowConfigure) = 0;
     virtual void onSysEx(const uint8_t *data, size_t length) {}
+    virtual void onProgramChange(int program) {}
 };
 ```
 
@@ -168,6 +200,9 @@ public:
   behind this rather than firing it unconditionally.
 - **`onSysEx(data, length)`** -- a complete, reassembled message addressed
   to this driver's device. Default implementation ignores it.
+- **`onProgramChange(program)`** -- a Program Change addressed to this
+  driver's device arrived, `program` in `[0,127]`. Default implementation
+  ignores it. The hook for mode/bank switching -- see below.
 
 ## The manager (`host/ctrldev/ControllerDriverManager`)
 
@@ -199,9 +234,10 @@ const Entry kDrivers[] = {
    status line; `gui/main.cpp` prints it once at startup if something
    loaded.
 
-`dispatchSysEx(msg)` routes a message to the loaded driver whose
-`inputSourceId` matches `msg.sourceId`; if nothing matches (unset source id,
-or a startup race), it's offered to every loaded driver rather than dropped.
+`dispatchSysEx(msg)`/`dispatchProgramChange(msg)` route a message to the
+loaded driver whose `inputSourceId` matches `msg.sourceId`; if nothing
+matches (unset source id, or a startup race), it's offered to every loaded
+driver rather than dropped.
 
 `Loaded` (the manager's internal per-driver record) stores its `MidiOutput`
 by value inside a `std::vector<std::unique_ptr<Loaded>>`, not
@@ -258,6 +294,68 @@ called from driver code on the control thread, but the *read* side has to
 satisfy the same "no allocation, no blocking, no locks" discipline as
 `S1DSPKernel+process.mm` does, because it's reached from the same callback.
 
+## Modes: reaching more than 8 knobs' worth of parameters
+
+A physical controller has a fixed number of knobs; Synth One has far more
+parameters than that. `ControllerDriver::onProgramChange()` is the general,
+framework-level answer: a driver that wants "modes" or "banks" reacts to an
+incoming Program Change by clearing and re-seeding
+`Engine`'s existing device-default CC table for a *different* set of target
+parameters. No new Engine state is needed for this -- `mDeviceDefaultCc` is
+already just a flat 128-entry table with no concept of "mode" baked in; a
+driver own the concept entirely by re-populating that same table each time
+the mode changes:
+
+```cpp
+void YourDriver::onProgramChange(int program) {
+    engine.clearDeviceDefaults();      // old mode's mapping no longer applies
+    if (program not in a mode you've designed) return;  // leave unbound, don't guess
+    // ... determine the new mode's 8 target parameters and seed them,
+    // synchronously if you already know the CCs, or after a fresh SysEx
+    // query if (like the MPK driver) you need to discover them per-mode.
+}
+```
+
+This works for *any* trigger a driver can turn into a Program Change --
+what actually produces the PC message is entirely device-specific and none
+of the framework's concern. The Akai MPK Mini mk3 happens to have a
+hardware-native one: its PAD CONTROLS row includes a **PROG SELECT** button
+that switches between the device's onboard program slots (0 = RAM/current,
+1-8 = stored) with no reprogramming required, and Zynthian's own driver
+already relies on this producing a Program Change -- see
+`AkaiMpkMiniMk3.cpp`'s file-header comment for the caveat that this specific
+assumption (PROG SELECT reliably sends PC) is unverified against real
+hardware here, same status as the rest of the protocol detail below.
+
+The MPK driver's mode table (`kModeTargets[kModeCount][8]`) treats the
+program number directly as the mode index, with 4 designed modes:
+
+| Mode (program) | Focus | Targets |
+| --- | --- | --- |
+| 0 | Sound (default) | cutoff, resonance, attackDuration, releaseDuration, lfo1Rate, reverbMix, delayMix, masterVolume |
+| 1 | Oscillators/voice | morph1Volume, morph2Volume, morph2Detuning, subVolume, fmAmount, noiseVolume, glide, morphBalance |
+| 2 | Filter envelope depth | filterAttackDuration, filterDecayDuration, filterSustainLevel, filterReleaseDuration, filterADSRMix, cutoffLFO, resonanceLFO, adsrPitchTracking |
+| 3 | Modulation/FX depth | lfo1Amplitude, lfo2Rate, lfo2Amplitude, phaserMix, phaserRate, autoPanAmount, autoPanFrequency, bitCrushSampleRate |
+
+`onProgramChange(program)`:
+1. Always `engine.clearDeviceDefaults()` first -- the previous mode's
+   mapping must not silently persist into the new one if the following
+   query fails or the slot is undesigned.
+2. If `program` is outside `[0, kModeCount)`, stop there -- no target set
+   exists for it, so the knobs stay unbound rather than reusing an
+   unrelated mode's mapping or guessing at one.
+3. Otherwise record `mCurrentMode = program` and re-run the same
+   `sendQuery(program)` used at startup, for that specific slot -- the
+   query command already takes an arbitrary program number (0-8), so this
+   is a direct reuse of the already-confirmed protocol, not new surface
+   area. The reply arrives later via `onSysEx()`/`parseKnobs()`, which reads
+   `kModeTargets[mCurrentMode]` to know what to seed.
+
+Only 4 of the device's 9 program slots have a designed mode; switching to
+slot 4-8 clears the knob defaults and leaves them there, deliberately -- add
+a row to `kModeTargets` (and bump `kModeCount`) to give a slot a purpose
+rather than inventing a mapping speculatively.
+
 ## Adding a driver for a new controller
 
 1. Create `host/ctrldev/YourDevice.h`/`.cpp`, modelled on
@@ -280,16 +378,20 @@ satisfy the same "no allocation, no blocking, no locks" discipline as
    control physically. Prefer discovering real CCs via SysEx query where
    possible (see the MPK driver below), and when you can't, say so in the
    user guide rather than shipping a plausible-looking guess.
+7. If the device reaches more parameters than its knobs can cover in one
+   pass, implement `onProgramChange()` for mode/bank switching -- see
+   "Modes" above. Optional; most controllers won't need it.
 
 ## Testing without hardware
 
-- **`SysExAssembler`/`SysExQueue`** are pure, allocation-free, and have no
-  platform dependency -- exercised by `tools/sysex_assembler_test.cpp`
+- **`SysExAssembler`/`SysExQueue`/`ProgramChangeQueue`** are pure,
+  allocation-free, and have no platform dependency -- exercised by
+  `tools/sysex_assembler_test.cpp`
   (`cmake --build build --target sysex_assembler_test && ./build/sysex_assembler_test`).
   Covers whole-message delivery, byte-at-a-time fragmentation, multi-chunk
   fragmentation, a dropped terminator followed by a fresh message (resync
-  on `0xF0`), interleaved Realtime bytes, overflow handling, and
-  `SysExQueue` push/pop/capacity behaviour. Run this after touching
+  on `0xF0`), interleaved Realtime bytes, overflow handling, and both
+  queues' push/pop/capacity behaviour. Run this after touching
   `MidiSysEx.h` -- it's fast and needs nothing else built.
 - **A new driver's parsing logic** (anything in `onSysEx()`) is testable
   the same way: hand-build a synthetic byte sequence matching your device's
@@ -330,7 +432,9 @@ Envelope (first 7 bytes, every command):
 | 6 | program slot | 0 (RAM/current) - 8 |
 
 Query request is just the envelope, wrapped: `F0 47 7F 49 66 00 01 <program>
-F7` (9 bytes). `AkaiMpkMiniMk3::sendQuery()` always asks for slot 0.
+F7` (9 bytes). `AkaiMpkMiniMk3::sendQuery()` asks for slot 0 (RAM/current) at
+`init()`, and whatever slot `onProgramChange()` was just told about after
+that -- see "Modes" above.
 
 Write/reply body continues for 246 more bytes (252 total; the full wire
 message including `F0`/`F7` is 254 bytes -- this exact length, plus the
@@ -346,14 +450,8 @@ command byte `0x67`, is what `onSysEx()` checks before trusting a reply):
 
 `parseKnobs()` reads the CC byte (offset `+1`) from each of the 8 knob
 blocks at `91 + k*20` and calls `engine.setDeviceDefaultCc(cc, target)` for
-a fixed target list:
-
-```cpp
-constexpr S1Parameter kKnobTargets[8] = {
-    cutoff, resonance, attackDuration, releaseDuration,
-    lfo1Rate, reverbMix, delayMix, masterVolume,
-};
-```
+the active mode's target row (`kModeTargets[mCurrentMode]` -- see "Modes"
+above for the full table and how `mCurrentMode` gets set).
 
 Before trusting any of it, `parseKnobs()` sanity-checks each block (`mode
 <= 1`, `cc <= 127`); a single implausible value aborts parsing for *all*
@@ -374,6 +472,14 @@ itself, not just what this driver reads.
 - WinMM SysEx RX/TX: implemented, not run on real Windows.
 - MPK Mini mk3 protocol: transcribed from a working reference, not
   independently confirmed against a physical unit.
+- **Mode switching depends on PROG SELECT sending Program Change**, which is
+  the documented, Zynthian-precedented mechanism but is not independently
+  confirmed against real MPK Mini mk3 hardware here. If it turns out the
+  device doesn't send PC on its own (or sends something else), modes 1-3
+  simply never activate -- mode 0's behavior is unaffected either way, so
+  this degrades safely, but it's untested.
+- Only 4 of the MPK's 9 program slots (0-3) have a designed mode; 4-8
+  intentionally clear the knob defaults and stop there.
 - No hotplug detection (matches the rest of this port's MIDI handling).
 - `writeProgram()` exists but is never invoked automatically.
 - The Windows device-name hint for the MPK Mini mk3

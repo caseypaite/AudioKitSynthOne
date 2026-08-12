@@ -5,7 +5,8 @@
 //  Matches connected MIDI input ports against the compiled-in controller
 //  drivers by name (Zynthian-style dev_ids matching, scaled down: a small
 //  static table, not a plugin system), loads whichever one(s) claim a
-//  connected device, and routes reassembled SysEx messages to them.
+//  connected device, and routes reassembled SysEx and Program Change
+//  messages to them.
 //
 //  No hotplug: matching happens once at startup against whatever MidiInput
 //  already connected, mirroring this codebase's existing MIDI port handling
@@ -55,6 +56,11 @@ public:
     /// captured, or there's a startup race -- offers the message to every
     /// loaded driver rather than dropping it silently.
     void dispatchSysEx(const SysExMessage &msg);
+
+    /// Routes a Program Change message (from ProgramChangeQueue) the same
+    /// way dispatchSysEx routes a SysEx message: by sourceId first, offered
+    /// to every loaded driver if unmatched.
+    void dispatchProgramChange(const ProgramChangeMessage &msg);
 
     bool loaded() const { return !mLoaded.empty(); }
 

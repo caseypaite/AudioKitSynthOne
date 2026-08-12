@@ -158,6 +158,29 @@ int main() {
         check(!queue.push(in), "queue push when full fails");
     }
 
+    // -- ProgramChangeQueue: push/pop round-trip and capacity behaviour -
+    {
+        s1::ProgramChangeQueue queue;
+        s1::ProgramChangeMessage in;
+        in.channel = 0;
+        in.program = 5;
+        in.sourceId = 42;
+        check(queue.push(in), "pc queue push succeeds");
+
+        s1::ProgramChangeMessage out;
+        check(queue.pop(out), "pc queue pop succeeds");
+        check(out.sourceId == 42, "pc queue round-trip preserves sourceId");
+        check(out.program == 5, "pc queue round-trip preserves program");
+
+        s1::ProgramChangeMessage empty;
+        check(!queue.pop(empty), "pc queue pop on empty queue fails");
+
+        for (size_t i = 0; i < s1::ProgramChangeQueue::kCapacity - 1; ++i) {
+            check(queue.push(in), "pc queue push while not full succeeds");
+        }
+        check(!queue.push(in), "pc queue push when full fails");
+    }
+
     std::printf("\n%s (%d failure%s)\n", gFailures == 0 ? "ALL PASS" : "FAILED",
                gFailures, gFailures == 1 ? "" : "s");
     return gFailures == 0 ? 0 : 1;

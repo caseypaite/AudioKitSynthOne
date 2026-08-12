@@ -12,6 +12,16 @@
 //  lock-free ring, would only complicate the hot path for a case that isn't on
 //  it.
 //
+//  Also carries ProgramChangeMessage/Queue: a controller driver's hook for
+//  detecting a hardware-native "mode" switch (e.g. the Akai MPK Mini mk3's
+//  PROG SELECT button choosing a different onboard program). Program Change
+//  is a plain 2-byte channel-voice message and could in principle ride the
+//  existing MidiQueue, but driver dispatch happens on the control thread (see
+//  ControllerDriverManager::dispatchProgramChange), not the render thread --
+//  same reasoning as SysEx above, so it gets its own small queue rather than
+//  competing with note/CC traffic or forcing driver logic onto the render
+//  thread.
+//
 
 #pragma once
 
@@ -67,6 +77,45 @@ private:
     SysExMessage         buffer[kCapacity];
     std::atomic<size_t> writeIndex{0};
     std::atomic<size_t> readIndex{0};
+};
+
+/// A Program Change message (status 0xC0|channel, one data byte).
+struct ProgramChangeMessage {
+    int channel = 0;
+    int program = 0;
+    // Same meaning as SysExMessage::sourceId: ALSA client id, or a WinMM
+    // device index. -1 = unknown.
+    int sourceId = -1;
+};
+
+/// Single-producer/single-consumer ring for ProgramChangeMessage, mirroring
+/// SysExQueue at a smaller capacity still -- a mode switch is a rarer event
+/// than even a SysEx handshake.
+class ProgramChangeQueue {
+public:
+    static constexpr size_t kCapacity = 8; // power of two
+
+    bool push(const ProgramChangeMessage &m) {
+        const size_t head = writeIndex.load(std::memory_order_relaxed);
+        const size_t next = (head + 1) & (kCapacity - 1);
+        if (next == readIndex.load(std::memory_order_acquire)) return false;
+        buffer[head] = m;
+        writeIndex.store(next, std::memory_order_release);
+        return true;
+    }
+
+    bool pop(ProgramChangeMessage &out) {
+        const size_t tail = readIndex.load(std::memory_order_relaxed);
+        if (tail == writeIndex.load(std::memory_order_acquire)) return false;
+        out = buffer[tail];
+        readIndex.store((tail + 1) & (kCapacity - 1), std::memory_order_release);
+        return true;
+    }
+
+private:
+    ProgramChangeMessage buffer[kCapacity];
+    std::atomic<size_t>  writeIndex{0};
+    std::atomic<size_t>  readIndex{0};
 };
 
 /// Accumulates fragmented SysEx bytes into complete messages. Shared logic for

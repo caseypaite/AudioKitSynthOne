@@ -90,9 +90,14 @@ public:
     /// failed entirely, or was given an empty spec.
     std::vector<MidiSource> connectedSources() const { return mConnected; }
 
-    /// `sysexQueue` is optional -- pass nullptr to drop SysEx on the floor
-    /// (the pre-existing behaviour) rather than assembling it.
-    void start(MidiQueue *queue, SysExQueue *sysexQueue = nullptr);
+    /// `sysexQueue`/`programChangeQueue` are optional -- pass nullptr to drop
+    /// SysEx/Program Change on the floor (SysEx: the pre-existing behaviour;
+    /// Program Change: previously delivered piggybacked on `queue` on
+    /// Windows only, and dropped entirely on Linux -- see enqueuePacked()
+    /// and AlsaMidi.cpp's run()) rather than routing it to a controller
+    /// driver.
+    void start(MidiQueue *queue, SysExQueue *sysexQueue = nullptr,
+              ProgramChangeQueue *programChangeQueue = nullptr);
     void stop();
 
     /// Enumerate readable MIDI sources on the system.
@@ -102,8 +107,11 @@ public:
 
 #ifdef _WIN32
     /// Called from the WinMM callback thread with a packed short message.
-    /// Public only because that callback is a free function.
-    void enqueuePacked(uint32_t packed);
+    /// Public only because that callback is a free function. `handle` is the
+    /// HMIDIIN it arrived on, used only to tag a Program Change message's
+    /// sourceId (see enqueueSysExFragment for the same lookup on the SysEx
+    /// path).
+    void enqueuePacked(uint32_t packed, void *handle);
 
     /// Called from the WinMM callback thread with a MIM_LONGDATA (SysEx)
     /// buffer. Public for the same reason as enqueuePacked. `hdr` is the
@@ -113,12 +121,13 @@ public:
 #endif
 
 private:
-    std::string             mPortName;
-    MidiQueue               *mQueue = nullptr;
-    SysExQueue               *mSysExQueue = nullptr;
-    SysExAssembler            mSysExAssembler;
-    std::vector<MidiSource>  mConnected;
-    std::atomic<bool>        mRunning{false};
+    std::string              mPortName;
+    MidiQueue                *mQueue = nullptr;
+    SysExQueue                *mSysExQueue = nullptr;
+    ProgramChangeQueue        *mProgramChangeQueue = nullptr;
+    SysExAssembler             mSysExAssembler;
+    std::vector<MidiSource>   mConnected;
+    std::atomic<bool>         mRunning{false};
 
 #ifdef _WIN32
     // HMIDIIN, kept as void* so this header stays free of <windows.h>.

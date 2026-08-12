@@ -126,4 +126,14 @@ void ControllerDriverManager::dispatchSysEx(const SysExMessage &msg) {
     for (auto &loaded : mLoaded) loaded->driver->onSysEx(msg.data, msg.length);
 }
 
+void ControllerDriverManager::dispatchProgramChange(const ProgramChangeMessage &msg) {
+    for (auto &loaded : mLoaded) {
+        if (loaded->inputSourceId == msg.sourceId) {
+            loaded->driver->onProgramChange(msg.program);
+            return;
+        }
+    }
+    for (auto &loaded : mLoaded) loaded->driver->onProgramChange(msg.program);
+}
+
 } // namespace s1::ctrldev
