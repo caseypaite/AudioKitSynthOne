@@ -91,11 +91,13 @@ CHANGE) switches between the device's onboard program slots without any
 reprogramming, and the driver treats each slot as a different knob mapping,
 re-running the same SysEx discovery for that slot's actual CC assignments.
 
+![Akai MPK Mini mk3 with the PROG SELECT button and PAD CONTROLS row highlighted](images/mpk-progselect-annotated.png)
+
 | Program slot | Mode | Knobs 1-8 |
 | --- | --- | --- |
 | 0 (RAM/default) | Sound | Cutoff, Resonance, Attack, Release, LFO 1 rate, Reverb mix, Delay mix, Master volume |
 | 1 | Oscillators/voice | OSC1 volume, OSC2 volume, OSC2 detune, Sub volume, FM amount, Noise volume, Glide, OSC1/2 balance |
-| 2 | Filter envelope | Filter attack, Filter decay, Filter sustain, Filter release, Filter/amp env mix, Cutoff LFO amount, Resonance LFO amount, Envelope pitch tracking |
+| 2 | Envelope depth | Filter attack, Filter decay, Filter sustain, Filter release, Filter/amp env mix, Envelope pitch tracking, Amp decay, Amp sustain |
 | 3 | Modulation/FX | LFO 1 amount, LFO 2 rate, LFO 2 amount, Phaser mix, Phaser rate, Autopan amount, Autopan rate, Bitcrush rate |
 
 Consult your MPK Mini mk3's manual for exactly how to reach PROG SELECT +
@@ -121,12 +123,29 @@ K5/K6/K7 land on the **FX** panel (LFO 1 rate, reverb mix, delay mix):
 ![FX panel with K5, K6 and K7 marked next to the knobs they control](images/app-fx-annotated.png)
 
 If you ever forget which physical knob drives which on-screen control in
-Mode 0, this is the reference to come back to. Modes 1-3 aren't
-screenshotted here yet -- use the table in
-[Switching modes](#switching-modes) as the reference for those; their
-targets live on the MAIN panel (oscillators/voice), the ENV panel's FILTER
-column (filter envelope), and the FX panel (LFO2/phaser/autopan/bitcrush)
-respectively.
+Mode 0, this is the reference to come back to.
+
+### Where each knob shows up in the app (Mode 1: oscillators/voice)
+
+All 8 land on the **MAIN** panel -- OSC1/OSC2 volume and detune, sub/FM/noise
+levels, glide, and the OSC1/OSC2 balance:
+
+![MAIN panel with K1-K8 marked next to the Mode 1 knobs they control](images/app-mode1-oscillators.png)
+
+### Where each knob shows up in the app (Mode 2: envelope depth)
+
+All 8 land on the **ENV** panel -- the filter envelope's full ADSR, how much
+it affects cutoff, how much the envelope tracks pitch, and the amplitude
+envelope's decay/sustain (the two stages Mode 0 doesn't reach):
+
+![ENV panel with K1-K8 marked next to the Mode 2 knobs they control](images/app-mode2-envelope.png)
+
+### Where each knob shows up in the app (Mode 3: modulation/FX)
+
+All 8 land on the **FX** panel -- LFO 1/LFO 2 depth and LFO 2 rate, phaser
+mix/rate, autopan amount/rate, and bitcrush rate:
+
+![FX panel with K1-K8 marked next to the Mode 3 knobs they control](images/app-mode3-modulation.png)
 
 ## How this interacts with MIDI Learn
 

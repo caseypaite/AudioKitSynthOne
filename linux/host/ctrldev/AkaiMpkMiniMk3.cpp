@@ -86,11 +86,16 @@ constexpr S1Parameter kModeTargets[kModeCount][kKnobCount] = {
     // doesn't reach.
     {morph1Volume, morph2Volume, morph2Detuning, subVolume,
      fmAmount, noiseVolume, glide, morphBalance},
-    // Mode 2 (program 2): filter envelope depth -- the independent envelope
-    // from Mode 0's amp envelope, plus how hard the LFOs hit filter cutoff
-    // and resonance and how much the envelope tracks pitch.
+    // Mode 2 (program 2): envelope depth -- the filter envelope's full ADSR
+    // (independent from Mode 0's amp attack/release), the amp envelope's
+    // decay/sustain stages that Mode 0 doesn't reach, how much the filter
+    // envelope affects cutoff, and how much the envelope tracks pitch.
+    // (cutoffLFO/resonanceLFO were considered here but are the LFO ROUTING
+    // matrix's boolean route-enable checkboxes in gui/Panels.cpp, not
+    // continuous knobs -- a poor fit for a CC sweep, so they're not used as
+    // targets anywhere in this table.)
     {filterAttackDuration, filterDecayDuration, filterSustainLevel, filterReleaseDuration,
-     filterADSRMix, cutoffLFO, resonanceLFO, adsrPitchTracking},
+     filterADSRMix, adsrPitchTracking, decayDuration, sustainLevel},
     // Mode 3 (program 3): modulation/FX depth -- LFO1 depth, LFO2 rate/depth,
     // phaser, autopan, bitcrush.
     {lfo1Amplitude, lfo2Rate, lfo2Amplitude, phaserMix,

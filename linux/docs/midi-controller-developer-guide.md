@@ -327,6 +327,8 @@ already relies on this producing a Program Change -- see
 assumption (PROG SELECT reliably sends PC) is unverified against real
 hardware here, same status as the rest of the protocol detail below.
 
+![Akai MPK Mini mk3 with the PROG SELECT button and PAD CONTROLS row highlighted](images/mpk-progselect-annotated.png)
+
 The MPK driver's mode table (`kModeTargets[kModeCount][8]`) treats the
 program number directly as the mode index, with 4 designed modes:
 
@@ -334,7 +336,7 @@ program number directly as the mode index, with 4 designed modes:
 | --- | --- | --- |
 | 0 | Sound (default) | cutoff, resonance, attackDuration, releaseDuration, lfo1Rate, reverbMix, delayMix, masterVolume |
 | 1 | Oscillators/voice | morph1Volume, morph2Volume, morph2Detuning, subVolume, fmAmount, noiseVolume, glide, morphBalance |
-| 2 | Filter envelope depth | filterAttackDuration, filterDecayDuration, filterSustainLevel, filterReleaseDuration, filterADSRMix, cutoffLFO, resonanceLFO, adsrPitchTracking |
+| 2 | Envelope depth | filterAttackDuration, filterDecayDuration, filterSustainLevel, filterReleaseDuration, filterADSRMix, adsrPitchTracking, decayDuration, sustainLevel |
 | 3 | Modulation/FX depth | lfo1Amplitude, lfo2Rate, lfo2Amplitude, phaserMix, phaserRate, autoPanAmount, autoPanFrequency, bitCrushSampleRate |
 
 `onProgramChange(program)`:
