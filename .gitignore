@@ -73,6 +73,7 @@ AudioKitSynthOne/Link/include
 AudioKitSynthOne/Link/lib
 /AudioKitSynthOne/Private.swift
 /CLAUDE.md
+/.claude/
 
 # Per-panel captures. Only panels.gif, built from them, is tracked -- the
 # README displays it. Regenerate the stills by running synthone-gui --fullscreen
