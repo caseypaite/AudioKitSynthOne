@@ -75,6 +75,7 @@ AudioKitSynthOne/Link/lib
 /CLAUDE.md
 /.claude/
 /HANDOFF.md
+/linux/kiosk/40-goodix-touch-rotate.conf
 
 # Per-panel captures. Only panels.gif, built from them, is tracked -- the
 # README displays it. Regenerate the stills by running synthone-gui --fullscreen
