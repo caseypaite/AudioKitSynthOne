@@ -415,6 +415,9 @@ else()
         host/ctrldev/NovationLaunchpadProMk3.cpp
         host/ctrldev/NovationLaunchpadX.cpp
         host/ctrldev/KorgNanoKontrol2.cpp
+        host/ctrldev/BehringerMotor.cpp
+        host/ctrldev/WorldeMini.cpp
+        host/ctrldev/TeenageEngineeringOp1.cpp
         ${S1_MIDI_SOURCE}
     )
     target_include_directories(synthone_host PUBLIC host host/ctrldev)
@@ -502,6 +505,18 @@ else()
     # controls at all) -- see tools/korg_nanokontrol2_test.cpp.
     add_executable(korg_nanokontrol2_test tools/korg_nanokontrol2_test.cpp)
     target_link_libraries(korg_nanokontrol2_test PRIVATE synthone_host)
+
+    # Remaining-vendor driver tests: Behringer MOTOR (fixed-CC, richest
+    # driver in this port), WORLDE MINI (note-based function pads, no CC),
+    # Teenage Engineering OP-1 (thin/no-op, relative encoders) -- see the
+    # individual .cpp files.
+    foreach(_vendor_test
+            behringer_motor_test
+            worlde_mini_test
+            teenage_engineering_op1_test)
+        add_executable(${_vendor_test} tools/${_vendor_test}.cpp)
+        target_link_libraries(${_vendor_test} PRIVATE synthone_host)
+    endforeach()
 
     add_executable(synthone host/main.cpp)
     target_link_libraries(synthone PRIVATE synthone_host)

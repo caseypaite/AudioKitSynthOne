@@ -24,6 +24,9 @@
 #include "NovationLaunchpadProMk3.h"
 #include "NovationLaunchpadX.h"
 #include "KorgNanoKontrol2.h"
+#include "BehringerMotor.h"
+#include "WorldeMini.h"
+#include "TeenageEngineeringOp1.h"
 
 namespace s1::ctrldev {
 
@@ -62,6 +65,9 @@ const Entry kDrivers[] = {
     {"novation-launchpad-pro-mk3", makeNovationLaunchpadProMk3},
     {"novation-launchpad-x", makeNovationLaunchpadX},
     {"korg-nanokontrol2", makeKorgNanoKontrol2},
+    {"behringer-motor", makeBehringerMotor},
+    {"worlde-mini", makeWorldeMini},
+    {"teenage-engineering-op1", makeTeenageEngineeringOp1},
 };
 
 std::string toLower(std::string s) {

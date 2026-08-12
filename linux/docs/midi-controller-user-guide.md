@@ -36,6 +36,9 @@ as expected.
 | Novation Launchpad Pro mk2 | `novation-launchpad-pro-mk2` | Switches into DAW mode on startup so STOP/PLAY/RECORD work as dedicated transport buttons -- see [Novation Launchpad family](#novation-launchpad-family). The grid plays as plain notes. |
 | Novation Launchpad Pro mk3 | `novation-launchpad-pro-mk3` | Same as Launchpad Mini -- see [Novation Launchpad family](#novation-launchpad-family). |
 | Korg nanoKONTROL2 | `korg-nanokontrol2` | Maps 7 of the 8 faders and all 8 knobs to synth parameters -- see [Korg nanoKONTROL2](#korg-nanokontrol2). No buttons mapped; this device has no keybed or pads. |
+| Behringer MOTÖR61 / MOTÖR49 | `behringer-motor` | Maps 25 faders/encoders to synth parameters and 4 pads to transport functions -- see [Behringer MOTOR61/49](#behringer-motor61-motor49). |
+| WORLDE MINI | `worlde-mini` | Maps 4 of 8 pads to transport functions -- see [WORLDE MINI](#worlde-mini). No knobs mapped (none are documented); the keybed and other pads play as plain notes. |
+| Teenage Engineering OP-1 | `teenage-engineering-op1` | Device recognition only -- see [Teenage Engineering OP-1](#teenage-engineering-op-1). Its knobs report relative turns, and every button is a type this driver framework can't react to. |
 
 Don't see your controller? It still works as a plain MIDI keyboard/controller
 -- see [Using it with an unsupported controller](#using-it-with-an-unsupported-controller)
@@ -384,6 +387,55 @@ Rewind/Fast-Forward/Cycle), and track/marker navigation buttons -- every one
 of them reports as a MIDI CC press with no way for this driver framework to
 react to it (the same limitation the Launchkey/MPK249 transport buttons
 have -- see [Akai MPK249](#akai-mpk249)).
+
+## Behringer MOTOR61/49
+
+No startup handshake needed -- everything is mapped the moment the driver
+loads.
+
+| Control | Maps to |
+| --- | --- |
+| Upper-bank faders (8) | Cutoff, resonance, attack, release, LFO 1 rate, reverb mix, delay mix, master volume |
+| Lower-bank faders (8) | OSC1/OSC2 volume, OSC2 detune, sub volume, FM amount, noise volume, glide, OSC1/2 balance |
+| Pedal-bank faders (8) | Filter attack/decay/sustain/release, filter/amp env mix, envelope pitch tracking, amp decay, amp sustain |
+| Master fader | Master volume |
+| Upper-bank encoders 1-4 + "Pianoteq" encoders 5-8 (8 total) | LFO 1/LFO 2 depth and LFO 2 rate, phaser mix/rate, autopan amount/rate, bitcrush rate |
+| Lower-bank encoder 1 | Arp rate |
+| Pedal-bank encoder 1 | Stereo widen |
+| First pad of Bank A | Panic |
+| Second pad of Bank A | All notes off |
+| Third pad of Bank A | Arp/Seq on-off |
+| Fourth pad of Bank A | Switch between Arp mode and Sequencer mode |
+
+The other 28 pads (the rest of Bank A plus Banks B/C/D) play as plain notes
+-- this driver only claims the first 4. The motorized faders' "touch"
+sensing plays as plain (very low, inaudible-range) notes too; this driver
+has no use for it.
+
+## WORLDE MINI
+
+This is a budget clone of the Akai MPK Mini's layout. 4 of its 8 mode-select
+pads (channel 10) are claimed as transport buttons:
+
+| Pad | Function |
+| --- | --- |
+| 1st | Panic |
+| 2nd | All notes off |
+| 3rd | Arp/Seq on-off |
+| 4th | Switch between Arp mode and Sequencer mode |
+
+The other 4 pads, the keybed, and the second CC-based pad bank play/pass
+through normally -- no knobs are mapped (none are documented for this
+device).
+
+## Teenage Engineering OP-1
+
+Set the OP-1 to MIDI Mode first (Shift+COM, then choose CTRL). This driver
+recognizes the device but maps nothing -- its knobs report relative turns
+rather than a position (the same limitation as the Novation Launchkey Mini
+MK4 37's knobs), and every button on the device reports as a MIDI CC press
+rather than a Note, which this driver framework has no way to react to. The
+keys/pads play as plain notes; bind anything else yourself with MIDI Learn.
 
 ## How this interacts with MIDI Learn
 

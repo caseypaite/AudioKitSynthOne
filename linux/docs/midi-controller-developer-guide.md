@@ -878,6 +878,70 @@ intercepts Notes -- the same CC-vs-Note distinction first documented in
 them are bound. `tools/korg_nanokontrol2_test.cpp` follows the same
 synthetic-data shape as `akai_midimix_test.cpp`.
 
+## Remaining-vendor drivers: Behringer, WORLDE, Teenage Engineering
+
+Three more single-vendor devices are supported, and two more were
+researched and deliberately **not** built -- see below for why.
+
+**`BehringerMotor.cpp`** (Behringer MOTÖR61/MOTÖR49) is the richest
+fixed-CC driver in this port: 25 confirmed absolute fader/encoder CCs
+(Zynthian's own driver uses them for setBfree Hammond-organ drawbars and
+Pianoteq parameters, neither of which Synth One has) reused across this
+port's now-familiar 4 target-set vocabulary (MPK Mini mk3's Modes 0-3), plus
+4 of 32 confirmed pad notes claimed as function pads (panic / all notes off
+/ arp on-off / arp<->sequencer mode). Everything -- faders, encoders, and
+pads -- is confirmed on a single MIDI channel (channel 2), which this driver
+uses `PadFilter::claimChannel()` for explicitly, rather than the wildcard
+channel most other drivers in this port fall back to when the channel isn't
+confirmed. The device's "fader touch" notes (0-32, sent when a motorized
+fader is physically touched, purely so Zynthian can suppress feedback while
+a fader is held) are left alone -- this framework has no fader-feedback
+concept for them to matter to (see the developer guide's "Why this exists"
+section).
+
+**`WorldeMini.cpp`** (WORLDE MINI) is, per Zynthian's own file comment, a
+budget clone of the Akai MPK Mini's layout; its own Zynthian integration is
+a "mode enforcer" for musical scale/key masking, a concept with no Synth One
+equivalent. What's reusable is the confirmed fact of 8 note-based pads on a
+confirmed channel with no handshake required -- 4 are claimed as function
+pads, the same 4-function transport mapping the Akai MPK Mini mk3's own top
+row established.
+
+**`TeenageEngineeringOp1.cpp`** (Teenage Engineering OP-1, MIDI Mode) is a
+recognition-only stub, and that's the confirmed, correct scope: its 4
+encoders are confirmed relative (the same two's-complement-style delta the
+Novation Launchkey Mini mk4 37's encoders use), and every other control --
+transport, mode buttons, arrows, everything -- is CC-based with no
+`onCC()` hook to act on, the limitation `AkaiMpk249.cpp` first documented.
+
+**Not built: Fostex MixTab.** Its Zynthian driver's `dev_ids = ["*"]` --
+literally a wildcard, because the device apparently can't be identified by
+name over MIDI at all (`autoload_flag = False` in the source; even Zynthian
+doesn't auto-select it by name matching). This port's
+`ControllerDriverManager::load()` has no wildcard-match or no-name-required
+force-load path -- every driver, even one explicitly requested by name, must
+still match a connected input's name against `deviceNameHints()`. Building a
+driver with an empty or fabricated hint list would mean it can never load at
+all, which isn't a working driver; extending the manager to support a true
+wildcard match is a framework change with no other user yet, and out of
+scope for adding one device's driver.
+
+**Not built: Sinco SMK25 (and the Bluetooth SMK25V2 variant).** Both
+devices' Zynthian drivers depend on first **writing new configuration into
+the device's flash memory** (a `FlashType` SysEx protocol, confirmed in the
+source, run once via a companion "25KEY editor" tool) to get the knobs and
+pads into the state Zynthian's own protocol comments describe -- the
+factory/out-of-box behavior is unconfirmed and, per the source's own
+comment, produces *relative* encoder output even after that reprogramming
+("CC value 0 (CCW) or 1 (CW) -- effectively relative encoders"), which this
+framework's `Engine::handleMidi()` CC path can't bind safely regardless (see
+the Novation Launchkey Mini mk4 37 entry above). Replicating an
+unconfirmed, persistent flash write to unfamiliar hardware -- with no way to
+verify it succeeded or is safe -- is a materially different and riskier
+action than every SysEx/Note-On mode-entry handshake elsewhere in this port,
+all of which are runtime-only and have no effect that survives a power
+cycle. Both are left unbuilt rather than guessed at or risked.
+
 ## Known gaps / where to look before trusting this in production
 
 - WinMM SysEx RX/TX: implemented, not run on real Windows.
@@ -959,3 +1023,19 @@ synthetic-data shape as `akai_midimix_test.cpp`.
   hardware** -- see "The Korg nanoKONTROL2 driver" above for its own
   citation and the fader-2/mod-wheel-CC caveat. Its Windows device-name hint
   is unconfirmed the same way every other driver's is.
+- **None of the Behringer/WORLDE/Teenage Engineering drivers has been run
+  against physical hardware either** -- see "Remaining-vendor drivers"
+  above for each one's own citation and caveats. All three's Windows
+  device-name hints are unconfirmed the same way every other driver's is.
+- **The Behringer MOTÖR's pad-bank-to-transport-function mapping is a
+  design choice layered onto a device meant for musical scale selection**,
+  not a confirmed transcription -- if the real hardware's Bank A ordering
+  differs from the source's `_MODE_BANKS["notes"]` list order, the practical
+  effect is the 4 claimed functions landing on different physical pads, not
+  a crash or leaked notes (same degrade-safely shape as the MPK Mini mk3's
+  own unconfirmed pad-table-order assumption).
+- **Fostex MixTab and Sinco SMK25 (both variants) are deliberately
+  unbuilt** -- see "Remaining-vendor drivers" above. Revisit only if this
+  port's `ControllerDriverManager` grows wildcard-match support (Fostex) or
+  someone is willing to validate a flash-reprogramming step against real
+  hardware (Sinco).
