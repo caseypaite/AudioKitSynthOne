@@ -62,7 +62,7 @@ have picked (mostly useful for testing):
 
 ## What the Akai MPK Mini mk3 driver actually does
 
-![Akai MPK Mini mk3 with pads, knobs and keys annotated](images/mpk-mini-mk3-annotated.png)
+![Akai MPK Mini mk3 with knobs, keys, and the top-row transport / bottom-row panel-switch pads annotated](images/mpk-mini-mk3-annotated.png)
 
 1. **On startup**, if the device is connected on both MIDI in and out, the
    driver asks it (over SysEx) what its 8 knobs are currently set to send.
@@ -90,7 +90,7 @@ have picked (mostly useful for testing):
 
 ## Function pads
 
-![Akai MPK Mini mk3 with pads, knobs and keys annotated](images/mpk-mini-mk3-annotated.png)
+![Akai MPK Mini mk3 with knobs, keys, and the top-row transport / bottom-row panel-switch pads annotated](images/mpk-mini-mk3-annotated.png)
 
 8 of the 16 pads stop playing notes and become dedicated buttons instead:
 pressing one of these never sounds a note, on any mode or program slot.
