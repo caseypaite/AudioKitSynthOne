@@ -197,6 +197,30 @@ bool Engine::start(double sampleRate, int channels, const std::string &resourceD
     return true;
 }
 
+void Engine::setSampleRate(double newRate) {
+    if (!mKernel || newRate <= 0.0 || newRate == mSampleRate) return;
+
+    // Mirrors S1AudioUnit.mm's allocateRenderResourcesAndReturnError:, the
+    // upstream path CoreAudio drives on a format/sample-rate change: snapshot
+    // parameters and the tuning table, reinitialize the kernel, then restore
+    // both. destroy()/init() don't touch ft_array (the wavetables), so those
+    // don't need re-uploading -- only the increment values that depend on sr.
+    const DSPParameters parameters = mKernel->parameters;
+    float tuning[128];
+    for (int i = 0; i < 128; ++i) tuning[i] = mKernel->getTuningTableFrequency(i);
+
+    mKernel->init(mChannels, newRate);
+    mKernel->reset();
+    mKernel->restoreValues(parameters);
+    mKernel->updateWavetableIncrementValuesForCurrentSampleRate();
+    mKernel->initializeNoteStates();
+
+    for (int i = 0; i < 128; ++i) mKernel->setTuningTable(tuning[i], i);
+    mKernel->setTuningTableNPO(mNotesPerOctave);
+
+    mSampleRate = newRate;
+}
+
 bool Engine::loadWavetables(const std::string &resourceDir, std::string &error) {
     const fs::path tableDir = fs::path(resourceDir) / "DSP" / "BandlimitedWavetables";
 
@@ -997,6 +1021,14 @@ bool Engine::applyPreset(const std::string &bankName, int position, std::string 
     }
 
     mKernel->resetSequencer();
+
+    // The render loop clears all voices the first time it sees isMono differ
+    // from its own shadow copy (S1DSPKernel+process.mm) -- upstream behaviour
+    // that's invisible on iOS because the engine has been running continuously
+    // since long before playback starts. Do that reconciliation here instead,
+    // synchronously, so a preset that changes mono/poly can't silence a note
+    // started between this load and the next render callback.
+    mKernel->reconcileMonoPolyOnLoad();
 
     // Tuning travels with the preset if it was saved with one; absent, the
     // tuning already loaded (from the app or a previous preset) is left as is.

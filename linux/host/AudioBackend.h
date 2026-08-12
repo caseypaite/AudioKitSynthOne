@@ -20,6 +20,14 @@ namespace s1 {
 /// backend's realtime thread.
 using RenderCallback = std::function<void(float *left, float *right, uint32_t frames)>;
 
+/// Fires when the server's sample rate changes out from under an open stream.
+/// Only JACK can do this (a running server can be reconfigured by another
+/// client); PortAudio negotiates a fixed rate at open() and never revisits it.
+/// Runs on the backend's notification thread, which -- like the render thread
+/// -- must not block or allocate, so this must do no more than record the new
+/// rate for the control thread to act on.
+using SampleRateChangeCallback = std::function<void(double newRate)>;
+
 class AudioBackend {
 public:
     virtual ~AudioBackend() = default;
@@ -43,6 +51,10 @@ public:
     virtual const char *name() const = 0;
     virtual double sampleRate() const = 0;
     virtual uint32_t bufferFrames() const = 0;
+
+    /// Install a rate-change notification. Backends that can't change rate
+    /// mid-stream simply never call it -- the default does nothing.
+    virtual void setSampleRateChangeCallback(SampleRateChangeCallback) {}
 
     /// Backend-specific detail for the status line (JACK ports, PA device...).
     virtual std::string description() const { return {}; }

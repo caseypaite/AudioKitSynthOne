@@ -270,18 +270,6 @@ int main(int argc, char **argv) {
     std::vector<float> interleaved;
     interleaved.reserve(totalFrames * 2);
 
-    // Settle before playing. The kernel clears all voices on the first render
-    // after mono/poly changes, so a preset that differs from the DSP default
-    // would silence a note started beforehand. On iOS the engine is always
-    // running and this happens long before the user plays; here it has to be
-    // done explicitly.
-    for (uint32_t i = 0; i < 4; ++i) {
-        std::fill(left.begin(), left.end(), 0.f);
-        std::fill(right.begin(), right.end(), 0.f);
-        engine.render(left.data(), right.data(), block);
-        engine.drainNotifications();
-    }
-
     for (int n : notes) engine.noteOn(n, velocity);
     bool released = false;
 

@@ -91,7 +91,12 @@ Three binaries are produced:
 
 `--backend` selects `jack` or `portaudio` at runtime; both are compiled in when
 their libraries are present. JACK dictates its own sample rate and buffer size,
-so `--rate`/`--buffer`/`--latency` apply to PortAudio only.
+so `--rate`/`--buffer`/`--latency` apply to PortAudio only. If another client
+changes the JACK server's rate while `synthone`/`synthone-gui` is running, the
+engine reinitializes against the new rate automatically -- current parameters,
+the mono/poly note state and the tuning table all survive the switch, though
+audio drops out for the moment it takes to happen. PortAudio negotiates a
+fixed rate at startup and never needs this.
 
 On PortAudio the output latency follows `--buffer` -- one period, which is the
 floor a callback API can offer:
@@ -648,15 +653,10 @@ DSP→UI notifications go through the message ring, drained by the host.
   iOS (its SDK cannot be redistributed) and is not built for Linux at all.
   Audiobus/IAA are iOS-only inter-app-audio frameworks with no Linux/Windows
   equivalent. MIDI *output* is supported -- see `--midi-out` above.
-- **Sample rate** is fixed at engine start; changing the JACK rate while
-  running is not handled.
 - **On Windows, ASIO is not available** — it needs a licensed SDK that cannot
   be shipped. `--wasapi-exclusive` is the other route to genuinely low
   latency and is available (see [Windows](#windows-x86_64)). Actual
   round-trip latency has not been measured on any Windows machine.
-- Presets that differ from the DSP default in mono/poly clear all voices on the
-  first render after loading — upstream behaviour, invisible on iOS because the
-  engine runs continuously. Load presets before playing, not between notes.
 
 ## Layout
 

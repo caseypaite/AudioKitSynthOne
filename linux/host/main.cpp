@@ -320,6 +320,15 @@ int main(int argc, char **argv) {
         engine.render(left, right, frames);
     };
 
+    // The srate callback runs on JACK's notification thread and must not
+    // block or allocate, so it only records the new rate; the actual
+    // reinitialization happens below, on the control thread, with the stream
+    // stopped so it can never race the render callback.
+    std::atomic<double> pendingSampleRate{0.0};
+    backend->setSampleRateChangeCallback([&pendingSampleRate](double newRate) {
+        pendingSampleRate.store(newRate, std::memory_order_relaxed);
+    });
+
     if (!backend->start(render, error)) {
         std::cerr << "error: " << error << "\n";
         return 1;
@@ -354,6 +363,20 @@ int main(int argc, char **argv) {
     };
 
     while (gRunning.load()) {
+        const double newRate = pendingSampleRate.exchange(0.0, std::memory_order_relaxed);
+        if (newRate > 0.0 && newRate != engine.sampleRate()) {
+            if (!quiet) std::cout << "\n  [engine]  sample rate changed to " << newRate << " Hz\n";
+            backend->stop();
+            engine.setSampleRate(newRate);
+            std::string resumeError;
+            if (!backend->start(render, resumeError)) {
+                std::cerr << "\nerror: failed to resume audio after sample-rate change: "
+                          << resumeError << "\n";
+                gRunning.store(false);
+                continue;
+            }
+        }
+
         engine.drainNotifications();
 
         if (testNote >= 0) {

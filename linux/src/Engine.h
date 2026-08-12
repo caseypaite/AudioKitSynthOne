@@ -174,6 +174,14 @@ public:
     double sampleRate() const { return mSampleRate; }
     int    polyphony() const { return S1_MAX_POLYPHONY; }
 
+    /// Reinitializes the kernel against a new sample rate -- e.g. a JACK
+    /// server that was reconfigured while running -- preserving current
+    /// parameters and tuning. Call only while the audio backend is stopped;
+    /// the kernel allocates/frees DSP objects here, so this must never run
+    /// concurrently with render(). Not needed for PortAudio, which negotiates
+    /// a fixed rate at open() and never changes it later.
+    void setSampleRate(double newRate);
+
 private:
     bool loadWavetables(const std::string &resourceDir, std::string &error);
 

@@ -117,7 +117,22 @@ public:
     
     /// Puts all notes in release mode
     void reset();
-    
+
+#ifdef __OBJC__
+#else
+    // Linux: applyPreset() calls this so a preset that changes isMono clears
+    // voices synchronously at load time, rather than being deferred to the
+    // render loop's own check on the next callback (S1DSPKernel+process.mm) --
+    // which on iOS runs long before playback, but here could land between the
+    // load and a note the user has already started.
+    void reconcileMonoPolyOnLoad() {
+        if (parameters[isMono] != previousProcessMonoPolyStatus) {
+            reset();
+            previousProcessMonoPolyStatus = parameters[isMono];
+        }
+    }
+#endif
+
     /// Sets beatcounter to 0
     void resetSequencer();
     

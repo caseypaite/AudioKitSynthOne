@@ -314,6 +314,16 @@ int main(int argc, char **argv) {
         while (midiQueue.pop(m)) engine.handleMidi(m.data, m.length);
         engine.render(left, right, frames);
     };
+
+    // The srate callback runs on JACK's notification thread and must not
+    // block or allocate, so it only records the new rate; the actual
+    // reinitialization happens in the UI loop below, with the stream stopped
+    // so it can never race the render callback.
+    std::atomic<double> pendingSampleRate{0.0};
+    backend->setSampleRateChangeCallback([&pendingSampleRate](double newRate) {
+        pendingSampleRate.store(newRate, std::memory_order_relaxed);
+    });
+
     if (!backend->start(render, error)) {
         std::fprintf(stderr, "error: %s\n", error.c_str());
         return 1;
@@ -378,6 +388,19 @@ int main(int argc, char **argv) {
 
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
+
+        const double newRate = pendingSampleRate.exchange(0.0, std::memory_order_relaxed);
+        if (newRate > 0.0 && newRate != engine.sampleRate()) {
+            backend->stop();
+            engine.setSampleRate(newRate);
+            std::string resumeError;
+            if (!backend->start(render, resumeError)) {
+                std::fprintf(stderr, "error: failed to resume audio after sample-rate change: %s\n",
+                            resumeError.c_str());
+                glfwSetWindowShouldClose(window, GLFW_TRUE);
+            }
+        }
+
         engine.drainNotifications();
 
         ImGui_ImplOpenGL3_NewFrame();

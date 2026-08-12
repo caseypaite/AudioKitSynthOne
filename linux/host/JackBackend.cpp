@@ -50,7 +50,15 @@ public:
 
         mSampleRate = jack_get_sample_rate(mClient);
         mBufferFrames = jack_get_buffer_size(mClient);
+
+        // Must be registered before jack_activate(); harmless if the server
+        // never reconfigures its rate.
+        jack_set_sample_rate_callback(mClient, &JackBackend::srateTrampoline, this);
         return true;
+    }
+
+    void setSampleRateChangeCallback(SampleRateChangeCallback callback) override {
+        mSrateCallback = std::move(callback);
     }
 
     bool start(RenderCallback render, std::string &error) override {
@@ -118,10 +126,23 @@ private:
         return 0;
     }
 
+    static int srateTrampoline(jack_nframes_t nframes, void *arg) {
+        return static_cast<JackBackend *>(arg)->srateChanged(nframes);
+    }
+
+    int srateChanged(jack_nframes_t nframes) {
+        mSampleRate = nframes;
+        // Realtime-safe: std::function's captures here only ever wrap an
+        // atomic store (see main.cpp), never a call into the kernel directly.
+        if (mSrateCallback) mSrateCallback(static_cast<double>(nframes));
+        return 0;
+    }
+
     jack_client_t *mClient = nullptr;
     jack_port_t   *mLeft = nullptr;
     jack_port_t   *mRight = nullptr;
     RenderCallback mRender;
+    SampleRateChangeCallback mSrateCallback;
     double         mSampleRate = 48000.0;
     uint32_t       mBufferFrames = 256;
     bool           mActive = false;
