@@ -414,6 +414,7 @@ else()
         host/ctrldev/NovationLaunchpadProMk2.cpp
         host/ctrldev/NovationLaunchpadProMk3.cpp
         host/ctrldev/NovationLaunchpadX.cpp
+        host/ctrldev/KorgNanoKontrol2.cpp
         ${S1_MIDI_SOURCE}
     )
     target_include_directories(synthone_host PUBLIC host host/ctrldev)
@@ -495,6 +496,12 @@ else()
         add_executable(${_novation_test} tools/${_novation_test}.cpp)
         target_link_libraries(${_novation_test} PRIVATE synthone_host)
     endforeach()
+
+    # korg_nanokontrol2_test: exercises the Korg nanoKONTROL2 driver's fixed
+    # CC-default seeding (this device has no SysEx and no note-based
+    # controls at all) -- see tools/korg_nanokontrol2_test.cpp.
+    add_executable(korg_nanokontrol2_test tools/korg_nanokontrol2_test.cpp)
+    target_link_libraries(korg_nanokontrol2_test PRIVATE synthone_host)
 
     add_executable(synthone host/main.cpp)
     target_link_libraries(synthone PRIVATE synthone_host)

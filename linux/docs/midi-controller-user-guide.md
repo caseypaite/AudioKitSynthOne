@@ -35,6 +35,7 @@ as expected.
 | Novation Launchpad Mini mk3 | `novation-launchpad-mini-mk3` | Same as Launchpad Mini -- see [Novation Launchpad family](#novation-launchpad-family). |
 | Novation Launchpad Pro mk2 | `novation-launchpad-pro-mk2` | Switches into DAW mode on startup so STOP/PLAY/RECORD work as dedicated transport buttons -- see [Novation Launchpad family](#novation-launchpad-family). The grid plays as plain notes. |
 | Novation Launchpad Pro mk3 | `novation-launchpad-pro-mk3` | Same as Launchpad Mini -- see [Novation Launchpad family](#novation-launchpad-family). |
+| Korg nanoKONTROL2 | `korg-nanokontrol2` | Maps 7 of the 8 faders and all 8 knobs to synth parameters -- see [Korg nanoKONTROL2](#korg-nanokontrol2). No buttons mapped; this device has no keybed or pads. |
 
 Don't see your controller? It still works as a plain MIDI keyboard/controller
 -- see [Using it with an unsupported controller](#using-it-with-an-unsupported-controller)
@@ -366,6 +367,24 @@ dedicated buttons work as transport controls:
 The clip-launch grid plays as plain notes here too, same as the rest of the
 family.
 
+## Korg nanoKONTROL2
+
+This device has no keybed, no pads, and no startup handshake required --
+everything is mapped the moment the driver loads.
+
+| Control | Maps to |
+| --- | --- |
+| Fader 1 | Cutoff |
+| Fader 2 | **Not mapped** -- this fader happens to share CC1 with the universal MIDI mod wheel convention. Binding it would mean a mod wheel on a different, simultaneously-connected keyboard could unexpectedly move whatever this fader controlled, so it's left free. |
+| Faders 3-8 | Attack, release, LFO 1 rate, reverb mix, delay mix, master volume |
+| Knobs 1-8 | OSC1/OSC2 volume, OSC2 detune, sub volume, FM amount, noise volume, glide, OSC1/2 balance |
+
+Not mapped: the SOLO/MUTE/REC button rows, transport (Play/Stop/Record/
+Rewind/Fast-Forward/Cycle), and track/marker navigation buttons -- every one
+of them reports as a MIDI CC press with no way for this driver framework to
+react to it (the same limitation the Launchkey/MPK249 transport buttons
+have -- see [Akai MPK249](#akai-mpk249)).
+
 ## How this interacts with MIDI Learn
 
 A driver's knob mapping is a *default*, not a lock:
@@ -456,6 +475,12 @@ knobs or a safely-mappable button. Only the Launchpad Pro mk2's STOP/PLAY/
 RECORD buttons are supposed to do something; if those don't work, check
 `(SysEx TX unavailable)` first, then see the Arturia entry just above for
 the same "unverified handshake" caveat.
+
+**My Korg nanoKONTROL2's fader 2 doesn't do anything.** That's expected --
+see [Korg nanoKONTROL2](#korg-nanokontrol2), it deliberately isn't mapped to
+avoid colliding with the mod wheel convention. Bind it yourself with MIDI
+Learn if you want to use it for something. None of its buttons (SOLO/MUTE/
+REC, transport, navigation) do anything either -- see that section for why.
 
 **Switching modes with PROG SELECT doesn't change what the knobs control.**
 The knobs should go briefly unresponsive and then pick up the new mode's

@@ -851,6 +851,33 @@ design: `tools/novation_launchkey_*_test.cpp` check `deviceDefaultForCc()`
 handshake-plus-function-pads shape `arturia_keylab_61_mk2_test.cpp`
 established.
 
+## The Korg nanoKONTROL2 driver
+
+`KorgNanoKontrol2.cpp` is the simplest driver in this port: no SysEx, no
+mode-entry handshake of any kind (unlike every Akai/Arturia/Novation driver
+above), and no function pads. It's also the only device so far whose
+confirmed protocol facts required *not* binding something the developer
+guide's rule would otherwise allow: fader 2 sits at CC1, which collides with
+the universal MIDI mod wheel convention. This isn't a guessed CC (Zynthian's
+own `faders_ccnum = [0, 1, 2, 3, 4, 5, 6, 7]` confirms it), but binding it
+anyway would create exactly the hazard step 6 of "Adding a driver" above
+warns about -- a user's mod wheel, on a different, simultaneously-connected
+keyboard, silently driving whatever this driver bound to fader 2. Fader 2 is
+skipped; the other 7 faders and all 8 knobs (CC16-23) are bound normally.
+Worth remembering for any future driver: a real device can hand you this
+same hazard through a confirmed fact, not just a guess -- treat both the
+same way.
+
+This device also has **no note-based controls at all** -- Zynthian's own
+`midi_event()` has no note-on/off branch for it, only Control Change. Every
+button (SOLO/MUTE/REC x8, transport Play/Stop/Record/Rewind/Fast-Forward/
+Cycle, track/marker navigation) is therefore ineligible for the
+`PadFilter`/`onPadButton()` function-pad mechanism, which only ever
+intercepts Notes -- the same CC-vs-Note distinction first documented in
+`AkaiMpk249.cpp`'s file header, just total here rather than partial. None of
+them are bound. `tools/korg_nanokontrol2_test.cpp` follows the same
+synthetic-data shape as `akai_midimix_test.cpp`.
+
 ## Known gaps / where to look before trusting this in production
 
 - WinMM SysEx RX/TX: implemented, not run on real Windows.
@@ -928,3 +955,7 @@ established.
   losing the grid's default chromatic note layout. If a future change binds
   something on one of these (e.g. a confirmed dedicated button discovered on
   real hardware), revisit whether the handshake becomes worth sending.
+- **The Korg nanoKONTROL2 driver has not been run against physical
+  hardware** -- see "The Korg nanoKONTROL2 driver" above for its own
+  citation and the fader-2/mod-wheel-CC caveat. Its Windows device-name hint
+  is unconfirmed the same way every other driver's is.
