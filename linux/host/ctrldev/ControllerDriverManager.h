@@ -95,6 +95,16 @@ public:
     using PadButtonObserver = std::function<void(PadRow row, int index, bool isDown)>;
     void setPadButtonObserver(PadButtonObserver observer) { mPadButtonObserver = std::move(observer); }
 
+    /// Registered by a host to react to a driver's mode changing (see
+    /// ControllerDriver::modeStatusText()) -- called with that driver's own
+    /// modeStatusText() right after dispatchProgramChange() invokes
+    /// onProgramChange(), only when the text is non-empty. Both hosts in
+    /// this port register one: the GUI turns it into a status-line toast,
+    /// the headless CLI prints it. One slot, not a list, matching
+    /// PadButtonObserver above.
+    using ModeChangeObserver = std::function<void(const std::string &statusText)>;
+    void setModeChangeObserver(ModeChangeObserver observer) { mModeChangeObserver = std::move(observer); }
+
     bool loaded() const { return !mLoaded.empty(); }
 
 private:
@@ -108,6 +118,7 @@ private:
     // ALSA seq handle / WinMM handles with no defined copy semantics).
     std::vector<std::unique_ptr<Loaded>> mLoaded;
     PadButtonObserver                    mPadButtonObserver;
+    ModeChangeObserver                   mModeChangeObserver;
 };
 
 } // namespace s1::ctrldev

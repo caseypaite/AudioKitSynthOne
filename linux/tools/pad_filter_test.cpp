@@ -155,6 +155,16 @@ int main() {
         // is actually sent -- onProgramChange() itself must still clear.
         driver->onProgramChange(8);
         check(!padFilter.isPadNote(0, 40), "onProgramChange() clears prior pad claims immediately");
+        check(driver->modeStatusText() == "Program 8: knobs unbound (no designed mode)",
+             "modeStatusText() names an undesigned program by number");
+
+        driver->onProgramChange(2);
+        check(driver->modeStatusText() == "Mode 2: Envelope Depth",
+             "modeStatusText() names a designed mode (2)");
+
+        driver->onProgramChange(0);
+        check(driver->modeStatusText() == "Mode 0: Sound",
+             "modeStatusText() names Mode 0 after switching back to it");
     }
 
     std::printf("\n%s (%d failure%s)\n", gFailures == 0 ? "ALL PASS" : "FAILED",

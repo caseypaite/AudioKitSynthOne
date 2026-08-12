@@ -366,6 +366,13 @@ int main(int argc, char **argv) {
         driverManager.load(controllerDriverSpec, engine, midi.connectedSources(),
                            controllerDriverConfigure, padFilter, ccFilter, driverStatus);
     }
+    // No panels here to switch, but a driver's onboard mode/program switch
+    // (e.g. the Akai MPK Mini mk3's PROG SELECT) is still worth surfacing --
+    // it's otherwise invisible on this host, the same way it would be
+    // invisible on the device's own screen (see that driver's file header).
+    driverManager.setModeChangeObserver([quiet](const std::string &status) {
+        if (!quiet) std::cout << "\n  [ctrl]    " << status << "\n";
+    });
 
     s1::MidiOutput midiOut;
     std::string midiOutStatus = "off";

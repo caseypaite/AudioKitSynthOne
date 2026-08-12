@@ -175,11 +175,31 @@ a program number on your unit (this varies slightly by firmware). Slots 4-8
 have no assigned mode -- switching to one just leaves the knobs unbound
 until you switch back or MIDI-Learn them yourself.
 
+**Two ways to see which mode you're in.** Every time you switch programs,
+`synthone-gui` shows a brief status message ("Mode 0: Sound", etc., or
+"Program 5: knobs unbound (no designed mode)" for an undesigned slot) in the
+same place "loaded \<preset\>" and "all notes off" already appear; the
+headless `synthone` host prints an equivalent `[ctrl]` line to the console.
+Separately, if you run `synthone`/`synthone-gui` **once** with
+`--controller-driver-configure`, this driver renames each of the 8 knobs on
+program slots 0-3 to match what Synth One actually binds them to in that
+mode ("Cutoff", "Filt Attack", etc.) -- the device's own screen shows a
+knob's name while you're turning it, so this gives you a second, on-device
+way to see what a knob does without needing Synth One's own status message.
+This does rewrite your unit's stored programs 0-3 (only the knob mode/CC/name
+fields -- pads, MIDI channel, arp settings and the program's own name are
+left exactly as they were), so it's opt-in and only happens when you pass
+the flag, never automatically.
+
 Mode switching depends on the device actually sending a MIDI Program Change
 when you use PROG SELECT -- this is the standard, documented mechanism (the
-same one Zynthian's own MPK driver relies on), but hasn't been confirmed
-against physical hardware in this project's own testing. If switching
-modes doesn't do anything, see [Troubleshooting](#troubleshooting).
+same one Zynthian's own MPK driver relies on). Everything downstream of a
+Program Change arriving (re-binding the knobs, the status message above) is
+confirmed working against real hardware; whether PROG SELECT itself reliably
+sends one is the one link in this chain that's still unconfirmed, since
+that specifically requires pressing the physical button by hand. If
+switching modes doesn't do anything -- including no status message --
+see [Troubleshooting](#troubleshooting).
 
 ### Where each knob shows up in the app (Mode 0)
 
@@ -560,14 +580,18 @@ channel, so a device reporting on a different channel than expected would
 show this symptom too. As always, none of this affects the knobs/faders,
 which are a separate, independently-working path.
 
-**Switching modes with PROG SELECT doesn't change what the knobs control.**
-The knobs should go briefly unresponsive and then pick up the new mode's
-mapping; if nothing changes at all, either the device isn't sending a
-Program Change on PROG SELECT the way this driver expects (unverified
-against real hardware -- see the developer guide), or you're on a slot
-without a designed mode (only 0-3 have one). Try slot 0 first to confirm
-the driver itself is working, then try 1-3. As always, MIDI Learn works
-regardless of mode switching.
+**Switching modes with PROG SELECT doesn't change what the knobs control,
+or shows no status message at all.** The knobs should go briefly
+unresponsive and then pick up the new mode's mapping, and a status message
+("Mode N: ...") should appear either way. If neither happens, the device
+isn't sending a Program Change on PROG SELECT the way this driver expects
+-- the one link in this feature that's still unconfirmed against real
+hardware even though everything downstream of it now is (see the developer
+guide). If the status message appears but the knobs don't respond, you're
+probably on a slot without a designed mode (only 0-3 have one) -- the
+message itself will say so ("Program N: knobs unbound (no designed mode)").
+Try slot 0 first to confirm the driver itself is working, then try 1-3. As
+always, MIDI Learn works regardless of mode switching.
 
 **A pad plays a note instead of doing its function, or the wrong pad does
 the wrong thing.** On the Akai MPK Mini mk3, function pads are only claimed

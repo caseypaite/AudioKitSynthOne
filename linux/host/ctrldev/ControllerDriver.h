@@ -90,6 +90,17 @@ public:
     /// (see Engine::clearDeviceDefaults/setDeviceDefaultCc). Default: ignore.
     virtual void onProgramChange(int program) { (void)program; }
 
+    /// Human-readable description of whatever "mode" onProgramChange() just
+    /// switched to (e.g. "Mode 0: Sound"), for a host to surface to the user
+    /// -- Synth One's own screen is the only place this can show up for a
+    /// device whose display isn't writable by this framework (see the Akai
+    /// MPK Mini mk3's file header for why write access to that device's own
+    /// screen was tried and found not to work). Called by
+    /// ControllerDriverManager right after dispatching onProgramChange();
+    /// an empty string (the default -- most drivers never override this)
+    /// means "no mode concept" and nothing is reported.
+    virtual std::string modeStatusText() const { return {}; }
+
     /// A note-on/off arrived on (channel, note) that this driver had
     /// claimed as a function pad via `padFilter` in init() -- already
     /// diverted before it could reach Engine::handleMidi. A driver resolves

@@ -604,6 +604,77 @@ slot 4-8 clears the knob defaults and leaves them there, deliberately -- add
 a row to `kModeTargets` (and bump `kModeCount`) to give a slot a purpose
 rather than inventing a mapping speculatively.
 
+### Surfacing the current mode: `modeStatusText()`
+
+A driver with modes needs a way to show which one is active. Most
+controllers' own screens (if they even have one) aren't writable by this
+framework, so `ControllerDriver::modeStatusText() const` is the
+framework-level, device-independent answer: a driver overrides it to return
+a short, human-readable description of whatever `onProgramChange()` last
+switched to; the default returns an empty string ("no mode concept").
+Pull-based, not push-based -- `ControllerDriverManager::dispatchProgramChange()`
+calls it once, right after `onProgramChange()`, and forwards a non-empty
+result to whichever `ModeChangeObserver` the host registered
+(`setModeChangeObserver()`, the same one-slot-not-a-list shape as
+`PadButtonObserver`). Both hosts in this port register one: the GUI turns it
+into a status-line toast via the existing `UiState::notify()` mechanism
+(the same one "loaded \<preset\>" and "all notes off" already use), the
+headless CLI prints a `[ctrl]` line. `AkaiMpkMiniMk3::modeStatusText()`
+returns `"Mode N: <name>"` for modes 0-3 (`kModeNames`, parallel to
+`kModeTargets`) and `"Program N: knobs unbound (no designed mode)"` for
+anything else, using a separate `mLastProgram` member since `mCurrentMode`
+itself collapses to -1 outside the designed range. Confirmed live against
+real hardware by injecting synthetic Program Change messages into a running
+instance and reading the resulting console/GUI output -- see
+`tools/pad_filter_test.cpp` for the equivalent synthetic-data coverage.
+
+This is the only mode indicator available for a device whose screen isn't
+writable. The MPK Mini mk3 happens to have one that is -- see the next
+section.
+
+### Making the device's own screen agree: `--controller-driver-configure`
+
+The MPK Mini mk3's screen shows a knob's own programmed *name* while it's
+being turned (part of the same per-knob data block `parseKnobs()` reads --
+see the protocol reference below). `onConfigureReply()` uses `writeProgram()`
+to rewrite program slots 0-3 so each knob's name matches whatever Synth One
+actually binds it to in that mode ("Cutoff", "Filt Attack", etc.), giving
+the device's own screen a second, complementary way to show the current
+mode -- one knob's name at a time, rather than `modeStatusText()`'s
+always-a-full-sentence status line.
+
+Triggered once, from `init()`, only when `allowConfigure` is true
+(`--controller-driver-configure`): `mConfiguring`/`mConfigureSlot` step
+through programs 0-3 one `onSysEx()` reply at a time -- query a slot,
+patch its 8 knob blocks (mode forced to absolute, CC forced to one of a
+fixed undefined-range set `kConfigureCcs` (20-27, so a re-provisioned unit
+can never end up on a universally-reserved CC like the mod wheel), name set
+from `kModeTargetNames[slot]`), write it back via `writeProgram()`, pause
+briefly (the device's own flash write isn't instant), then query the next
+slot. Every other field in the 246-byte body -- pads, MIDI channels, arp
+settings, joystick config, the program's own name -- survives untouched,
+copied verbatim from what was just read. Once slot 3 is done, the sequence
+hands off to a normal, non-configuring query for slot 0, so the driver
+comes up bound for actual use exactly like a non-configure run would.
+
+**Confirmed working against real hardware** -- with one real bug found and
+fixed along the way, worth knowing about if `writeProgram()` is ever touched
+again: an earlier version of `writeProgram()`'s envelope construction
+included the program-slot number as an explicit 8th header byte *and* as
+the first byte of the 246-byte body parameter, producing a 255-byte message
+where the protocol (and a real device) expects 254 -- everything after the
+duplicated byte was shifted, and the device silently rejected the whole
+thing. This read as "the device doesn't honor writes" until Zynthian's
+actual shipped driver was loaded and its own write path
+(`_restore_mpk_program()`, which takes a previous *query reply* verbatim and
+flips just the direction and command bytes) was compared byte-for-byte
+against this one. `writeProgram()` now matches that shape -- see its own
+comment for the fix. After fixing it, the full 4-slot
+`--controller-driver-configure` sequence was run against a real MPK Mini
+mk3 and independently verified by re-querying and hand-decoding all 4
+slots outside the driver entirely: every knob came back with the intended
+mode/CC/name, and every untouched field came back byte-identical to before.
+
 ## Function pads: top row transport, bottom row tab-switch
 
 Built on the "Pad-button transport" mechanism above. Rather than playing
@@ -797,14 +868,12 @@ eight knobs rather than seeding a partial or garbage mapping -- if the
 offset assumption is wrong for a given firmware/unit, the result is "the
 knobs stay unbound," never "the knobs are bound to something wrong."
 
-`writeProgram()` (the `CMD_WRITE_DATA` path) is implemented but not called
-anywhere automatically, even when `--controller-driver-configure` is
-passed -- it's reserved for a future pass once the read path above has seen
-real hardware. If you pick this up: the pad-table offset (43) is now read
-by `parsePads()` (see "Function pads" above) but still never written by
-this driver; validate against real hardware before writing to it, since a
-wrong write could alter what's stored on the device itself, not just what
-this driver reads.
+`writeProgram()` (the `CMD_WRITE_DATA` path) is called by
+`onConfigureReply()`, gated behind `--controller-driver-configure` -- see
+"Making the device's own screen agree" above for what it rewrites and how
+it was verified against real hardware. Only the 8 knob blocks (offset 91)
+are ever written; the pad table (offset 43) is read by `parsePads()` but
+never written by this driver.
 
 ## Other Akai drivers: protocol references
 
@@ -1079,18 +1148,34 @@ cycle. Both are left unbuilt rather than guessed at or risked.
   `onCC()` logic), and built on both platforms, but -- like every CC/note
   number in this whole feature -- not run against real hardware.
 - WinMM SysEx RX/TX: implemented, not run on real Windows.
-- MPK Mini mk3 protocol: transcribed from a working reference, not
-  independently confirmed against a physical unit.
+- **MPK Mini mk3 read path: confirmed against real hardware.** A physical
+  unit was available for one testing session -- `sendQuery()`/`onSysEx()`/
+  `parsePads()`/`parseKnobs()` and the pad-table/knob-table offsets were
+  checked by hand-decoding a live query reply against these exact offsets,
+  and the pad/mode dispatch logic (`onPadButton()`, `onProgramChange()`,
+  `modeStatusText()`) was exercised end to end by injecting synthetic
+  Note On/Program Change messages into a running instance. See
+  `AkaiMpkMiniMk3.cpp`'s file header for specifics and for the two things
+  that testing *couldn't* reach (below).
+- **`writeProgram()`/CMD_WRITE_DATA: confirmed working**, after fixing a
+  real bug an earlier attempt turned up (a duplicated program-slot byte
+  producing a 255-byte message where the device expects 254 -- see
+  "Making the device's own screen agree" above). `--controller-driver-configure`
+  was run against a real MPK Mini mk3 and independently verified by
+  re-querying and hand-decoding all 4 reprogrammed slots outside the driver
+  entirely.
 - **Mode switching depends on PROG SELECT sending Program Change**, which is
-  the documented, Zynthian-precedented mechanism but is not independently
-  confirmed against real MPK Mini mk3 hardware here. If it turns out the
-  device doesn't send PC on its own (or sends something else), modes 1-3
-  simply never activate -- mode 0's behavior is unaffected either way, so
-  this degrades safely, but it's untested.
+  the documented, Zynthian-precedented mechanism. This specific link --
+  does physically pressing PROG SELECT actually emit a PC message -- could
+  not be tested even with real hardware available, since confirming it
+  means pressing the button by hand; what *was* confirmed is everything
+  downstream of a PC arriving (see above). If PROG SELECT turns out not to
+  send PC (or sends something else), modes 1-3 simply never activate --
+  mode 0's behavior is unaffected either way, so this degrades safely, but
+  it's still untested.
 - Only 4 of the MPK's 9 program slots (0-3) have a designed mode; 4-8
   intentionally clear the knob defaults and stop there.
 - No hotplug detection (matches the rest of this port's MIDI handling).
-- `writeProgram()` exists but is never invoked automatically.
 - The Windows device-name hint for the MPK Mini mk3
   (`deviceNameHints()`) is unconfirmed -- check with `--list-midi` on real
   Windows hardware and extend the hint list if the reported name differs

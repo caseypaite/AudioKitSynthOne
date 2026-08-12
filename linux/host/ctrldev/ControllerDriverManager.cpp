@@ -174,13 +174,18 @@ void ControllerDriverManager::dispatchSysEx(const SysExMessage &msg) {
 }
 
 void ControllerDriverManager::dispatchProgramChange(const ProgramChangeMessage &msg) {
+    auto handle = [&](Loaded &loaded) {
+        loaded.driver->onProgramChange(msg.program);
+        const std::string status = loaded.driver->modeStatusText();
+        if (!status.empty() && mModeChangeObserver) mModeChangeObserver(status);
+    };
     for (auto &loaded : mLoaded) {
         if (loaded->inputSourceId == msg.sourceId) {
-            loaded->driver->onProgramChange(msg.program);
+            handle(*loaded);
             return;
         }
     }
-    for (auto &loaded : mLoaded) loaded->driver->onProgramChange(msg.program);
+    for (auto &loaded : mLoaded) handle(*loaded);
 }
 
 void ControllerDriverManager::dispatchPadButton(const PadButtonMessage &msg) {

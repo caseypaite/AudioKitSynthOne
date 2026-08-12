@@ -47,6 +47,23 @@ one of them. Use **PROG SELECT** (in the PAD CONTROLS row, alongside BANK
 A/B, CC and PROG CHANGE) to step through slots -- consult your unit's manual
 for the exact button combo, as this varies slightly by firmware.
 
+**Two ways to see which mode you're in.** Every PROG SELECT press shows a
+brief status message in Synth One itself: "Mode 0: Sound", "Mode 2:
+Envelope Depth", or "Program 5: knobs unbound (no designed mode)" for an
+undesigned slot. `synthone-gui` shows it as a status-line toast (the same
+mechanism "loaded \<preset\>" uses); the headless `synthone` prints a
+`[ctrl]` line to the console.
+
+You can also make the *device's own screen* agree: run `synthone`/
+`synthone-gui` once with `--controller-driver-configure`, and this driver
+renames each knob on program slots 0-3 to match what it actually does in
+that mode ("Cutoff", "Filt Attack", ...) -- the MPK Mini mk3's screen shows
+a knob's name while you turn it, so this is a second, on-device way to see
+what a knob does without watching Synth One. This rewrites your unit's
+stored programs 0-3 (only the knob mode/CC/name fields; pads, MIDI channel,
+arp settings, and the program's own name are left exactly as they were), so
+it only happens when you explicitly pass the flag.
+
 ### Function pads
 
 8 of the 16 pads stop playing notes entirely and become dedicated buttons.
@@ -123,11 +140,15 @@ CC risks colliding with a universal MIDI convention (e.g. CC 1 is always the
 mod wheel), so the driver would rather bind nothing than bind something
 wrong. MIDI-Learn the knob yourself as a reliable fallback.
 
-**Switching PROG SELECT doesn't change what the knobs control.** The knobs
-should go briefly unresponsive, then pick up the new slot's mapping. If
-nothing changes, either your unit isn't sending a Program Change on PROG
-SELECT the way this driver expects (unverified against physical hardware),
-or you're on one of slots 4-8, which has no designed mode. Try slot 0 first
+**Switching PROG SELECT doesn't change what the knobs control, or shows no
+status message at all.** The knobs should go briefly unresponsive, then
+pick up the new slot's mapping, and a status message should appear either
+way (see [above](#what's-mapped)). If neither happens, your unit isn't
+sending a Program Change on PROG SELECT the way this driver expects -- the
+one part of this feature that's still unconfirmed against real hardware,
+even though everything downstream of a Program Change arriving now is. If
+the status message appears but the knobs don't, you're on one of slots
+4-8, which has no designed mode -- the message says so. Try slot 0 first
 to confirm the driver is working at all.
 
 **A pad plays a note instead of doing its function, or the wrong pad fires.**

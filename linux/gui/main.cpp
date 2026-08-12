@@ -492,6 +492,14 @@ int main(int argc, char **argv) {
         ui.topPanel = kBottomRowPanels[index];
         ui.notify(std::string("panel: ") + s1gui::PanelName(ui.topPanel));
     });
+    // A driver's onboard mode/program switch (e.g. the Akai MPK Mini mk3's
+    // PROG SELECT) has nowhere else to show up -- that device's own screen
+    // isn't writable by this framework (see its driver's file header), so
+    // the same transient status line "loaded <preset>"/"all notes off"
+    // already use is the only place a user can see which mode they're in.
+    driverManager.setModeChangeObserver([&ui](const std::string &status) {
+        ui.notify(status);
+    });
     if (controllerDriverSpec != "off") {
         std::string driverStatus;
         if (driverManager.load(controllerDriverSpec, engine, midi.connectedSources(),
