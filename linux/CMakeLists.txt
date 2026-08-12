@@ -404,6 +404,16 @@ else()
         host/ctrldev/AkaiApcKey25Mk2.cpp
         host/ctrldev/AkaiApc40Mk2.cpp
         host/ctrldev/AkaiMpk249.cpp
+        host/ctrldev/ArturiaKeyLab61Mk2.cpp
+        host/ctrldev/NovationLaunchkeyMiniMk3.cpp
+        host/ctrldev/NovationLaunchkeyMiniMk4.cpp
+        host/ctrldev/NovationLaunchkeyMk3.cpp
+        host/ctrldev/NovationLaunchkeyMk4.cpp
+        host/ctrldev/NovationLaunchpadMini.cpp
+        host/ctrldev/NovationLaunchpadMiniMk3.cpp
+        host/ctrldev/NovationLaunchpadProMk2.cpp
+        host/ctrldev/NovationLaunchpadProMk3.cpp
+        host/ctrldev/NovationLaunchpadX.cpp
         ${S1_MIDI_SOURCE}
     )
     target_include_directories(synthone_host PUBLIC host host/ctrldev)
@@ -459,6 +469,32 @@ else()
     # tools/akai_mpk249_test.cpp.
     add_executable(akai_mpk249_test tools/akai_mpk249_test.cpp)
     target_link_libraries(akai_mpk249_test PRIVATE synthone_host)
+
+    # arturia_keylab_61_mk2_test: exercises the Arturia KeyLab mkII 61
+    # driver's DAW-mode-entry handshake (no-crash paths) and its 4 claimed
+    # global/transport buttons against synthetic data -- see
+    # tools/arturia_keylab_61_mk2_test.cpp.
+    add_executable(arturia_keylab_61_mk2_test tools/arturia_keylab_61_mk2_test.cpp)
+    target_link_libraries(arturia_keylab_61_mk2_test PRIVATE synthone_host)
+
+    # Novation driver tests: fixed-CC/no-SysEx drivers (Launchkey family) and
+    # thin/no-op drivers (most of the Launchpad family) follow the same
+    # synthetic-data shape as the Akai drivers above; Launchpad Pro mk2
+    # follows the SysEx-handshake-plus-function-pads shape of
+    # ArturiaKeyLab61Mk2 -- see the individual .cpp files.
+    foreach(_novation_test
+            novation_launchkey_mini_mk3_test
+            novation_launchkey_mini_mk4_37_test
+            novation_launchkey_mk3_88_test
+            novation_launchkey_mk4_37_test
+            novation_launchpad_mini_test
+            novation_launchpad_mini_mk3_test
+            novation_launchpad_pro_mk2_test
+            novation_launchpad_pro_mk3_test
+            novation_launchpad_x_test)
+        add_executable(${_novation_test} tools/${_novation_test}.cpp)
+        target_link_libraries(${_novation_test} PRIVATE synthone_host)
+    endforeach()
 
     add_executable(synthone host/main.cpp)
     target_link_libraries(synthone PRIVATE synthone_host)

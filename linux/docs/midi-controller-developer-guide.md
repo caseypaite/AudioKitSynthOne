@@ -742,6 +742,115 @@ synthetic-data test tool (`tools/akai_midimix_test.cpp`,
 `pad_filter_test.cpp` exercises the MPK Mini mk3 -- no hardware needed,
 since none of these five call `onSysEx()` at all.
 
+## The Arturia KeyLab mkII 61 driver
+
+`ArturiaKeyLab61Mk2.cpp` is the one non-Akai driver in this port, and the
+only one that sends SysEx unconditionally at startup for a reason other than
+discovery: Arturia calls it "DAW mode," and without it the device's
+transport/track/global control buttons don't behave as this driver expects
+at all. `init()` sends two fixed messages (transcribed from Zynthian's
+`zynthian_ctrldev_arturia_keylab_61_mk2.py`, itself citing Arturia's own
+KeyLab mk2 manual and a third-party Bitwig extension's button-ID table) when
+an output port is available -- unconditional, not gated behind
+`--controller-driver-configure`, the same reasoning as the MPK Mini mk3's
+startup query: entering a mode isn't a persistent write to the device.
+
+Only 4 of the device's dedicated global/transport buttons are claimed as
+function pads -- STOP, PLAY/PAUSE, RECORD and METRONOME, mapped to panic /
+arp on-off / arp<->sequencer mode / all notes off, mirroring the MPK Mini
+mk3's own 4 top-row functions. Deliberately unbound, and why, is documented
+in full in the driver's file header -- in short, everything else on this
+device (the 8 SELECT buttons, the 5 track SOLO/MUTE/RECORD_ARM/READ/WRITE
+buttons, SAVE/PUNCH/UNDO/NEXT/PREVIOUS/BANK, the 4x4 pad grid) is either a
+per-mixer-channel Zynthian concept with no Synth One equivalent, or has no
+confirmed CC/note mapping in the source this driver was built from at all --
+notably the device's 8-knob/8-fader/8-toggle mixing strip, which Zynthian's
+own driver never assigns a mapping to either, so nothing is bound rather
+than guessed. See `tools/arturia_keylab_61_mk2_test.cpp` for its test
+coverage, following the same no-SysEx-reply-to-synthesize shape as the fixed-
+CC Akai drivers, plus two cases confirming `init()` doesn't crash when no
+MidiOutput is connected (skipping the handshake, not attempting it blindly).
+
+## The Novation drivers
+
+Nine Novation devices are supported: 4 in the **Launchkey** family
+(`NovationLaunchkeyMiniMk3.cpp`, `NovationLaunchkeyMiniMk4.cpp`,
+`NovationLaunchkeyMk3.cpp`, `NovationLaunchkeyMk4.cpp`) and 5 in the
+**Launchpad** family (`NovationLaunchpadMini.cpp`, `NovationLaunchpadX.cpp`,
+`NovationLaunchpadMiniMk3.cpp`, `NovationLaunchpadProMk2.cpp`,
+`NovationLaunchpadProMk3.cpp`). Protocol facts for all nine are transcribed
+from Zynthian's shipped drivers (`zyngine/ctrldev/zynthian_ctrldev_launchkey_*.py`
+and `zynthian_ctrldev_launchpad_*.py` on the `vangelis` branch of
+`zynthian/zynthian-ui`); none are independently validated against physical
+hardware in this project's development environment.
+
+**Launchkey knobs need a "session mode" handshake, and it's a Note On, not
+SysEx.** Every Launchkey driver sends `midiOut->noteOn(15, 12, 127)`
+unconditionally at `init()` (channel 15, note 12, velocity 127) before its
+knob CCs mean anything -- confirmed from Zynthian's own driver, which sends
+the identical message. This is the one case in this port's controller-driver
+framework where a startup handshake is a plain channel message instead of
+SysEx; `MidiOutput::noteOn()` already covers it, no new API was needed.
+
+**Not every Launchkey's knobs are safe to bind.** The Launchkey Mini mk3, MK3
+88, and MK4 37 all confirm their 8-knob row (CC 21-28) is *absolute* by how
+Zynthian's own driver consumes the values (`ccval / 127.0` fed straight into
+mixer-level/balance/`ZYNPOT_ABS` setters) -- these are bound via
+`Engine::setDeviceDefaultCc()` like any other fixed-CC device. The Launchkey
+**Mini mk4 37** is the exception: its knobs (CC 85-92) are explicitly put
+into "Transport mode (relative mode)" by Zynthian's own driver, and consumed
+as a signed delta (`ccval < 64` = negative, `> 64` = positive) rather than a
+position. `Engine::handleMidi()`'s CC path always treats an incoming value as
+an absolute 0-127 position (see `Engine.cpp`), so binding a relative CC would
+make a small nudge snap the target parameter towards its minimum instead of
+adjusting it smoothly -- `NovationLaunchkeyMiniMk4.cpp` deliberately binds
+nothing for this reason (see its file header for the full reasoning,
+including why simply *not* sending the relative-mode-select CC doesn't
+establish an absolute fallback exists to use instead).
+
+**Only two Launchkey CC ranges are richer than an 8-knob row.** The Launchkey
+MK3 88 additionally has 8 sliders (CC 53-60) and a master slider (CC 61),
+all confirmed absolute the same way; every other Launchkey in this port has
+only the one knob row. None of the Launchkey family's transport (Play/
+Record), navigation, or per-channel chain buttons are bound -- they're all
+CC-based, and `ControllerDriver` has no `onCC()`/`onControlChange()` hook (see
+`AkaiMpk249.cpp`'s file header for the fuller explanation of this limitation,
+first documented there).
+
+**Most Launchpads bind nothing at all, and that's the confirmed, correct
+scope, not a research gap.** `NovationLaunchpadMini.cpp` (mk1) has no knobs,
+no faders, and no confirmed transport-labelled button -- its 8 non-grid CC
+buttons are Session/User1/User2/Mixer/arrow-key labels on real hardware,
+with no honest Synth One mapping. `NovationLaunchpadX.cpp`,
+`NovationLaunchpadMiniMk3.cpp`, and `NovationLaunchpadProMk3.cpp` are
+structurally identical to each other: an 8x8 grid, a DAW-mode SysEx
+handshake, and 4 CC-based arrow buttons with no `onCC()` hook to act on.
+**These three deliberately don't send the DAW-mode handshake at all**, unlike
+every other mode-entry handshake in this port -- per Zynthian's own driver,
+entering that mode switches the grid away from its alternate "Keys"
+(chromatic note-playing) layout, and since nothing here is bound that would
+justify losing that, the tradeoff has no offsetting benefit. Compare with
+`NovationLaunchpadProMk2.cpp` below, where the same handshake *is* sent,
+because there's a confirmed payoff.
+
+**Launchpad Pro mk2 is the one Launchpad driver with function pads.** Its
+Zynthian source has 3 confirmed, dedicated (non-grid) note-based
+Record/Stop/Play buttons (notes 65/66/67) that need the DAW-mode SysEx
+handshake to route correctly -- `NovationLaunchpadProMk2.cpp` sends the
+handshake (3 messages, envelope `F0 00 20 29 02 10 <data> F7`: wake, enter
+Ableton/DAW mode, select session layout) and claims all 3 as function pads,
+mapped to panic / arp on-off / arp<->sequencer mode, the same 3-function
+transport mapping the Akai APC drivers use.
+
+Each driver's synthetic-data test tool follows the shape that matches its
+design: `tools/novation_launchkey_*_test.cpp` check `deviceDefaultForCc()`
+(including, for the Mini mk4 37, that its knob range stays *unbound*);
+`tools/novation_launchpad_{mini,mini_mk3,pro_mk3,x}_test.cpp` confirm
+`init()` is a safe no-op that claims and binds nothing;
+`tools/novation_launchpad_pro_mk2_test.cpp` follows the
+handshake-plus-function-pads shape `arturia_keylab_61_mk2_test.cpp`
+established.
+
 ## Known gaps / where to look before trusting this in production
 
 - WinMM SysEx RX/TX: implemented, not run on real Windows.
@@ -795,3 +904,27 @@ since none of these five call `onSysEx()` at all.
   all 8 physical faders share a single CC (channel-blind `Engine::
   mDeviceDefaultCc` can't tell them apart) -- see `AkaiApc40Mk2.cpp`'s file
   header.
+- **The Arturia KeyLab mkII 61's DAW-mode-entry handshake is unverified
+  against real hardware**, same status as the rest of this driver's protocol
+  facts -- if the device doesn't actually enter DAW mode from these two
+  messages (firmware difference, etc.), the 4 claimed buttons may not send
+  the note numbers this driver expects, degrading to "does nothing" rather
+  than anything unsafe.
+- **The KeyLab mkII 61's 8-knob/8-fader/8-toggle mixing strip has no CC
+  mapping at all** -- Zynthian's own reference driver never assigns one
+  either, so there was no confirmed protocol fact to transcribe. Bind these
+  with MIDI Learn.
+- **None of the 9 Novation drivers has been run against physical hardware**
+  -- see "The Novation drivers" above for each family's own citations and
+  caveats. All nine's Windows device-name hints are unconfirmed the same way
+  the MPK Mini mk3's is.
+- **The Launchkey Mini mk4 37's knobs are confirmed relative-encoder output
+  and are deliberately left unbound** -- there is no confirmed absolute mode
+  for them in the source this driver was built from. See
+  `NovationLaunchkeyMiniMk4.cpp`'s file header.
+- **Three Launchpad drivers (X, Mini mk3, Pro mk3) deliberately skip the
+  DAW-mode SysEx handshake** their own Zynthian reference sends, since
+  nothing in this port's drivers for them is bound that would justify
+  losing the grid's default chromatic note layout. If a future change binds
+  something on one of these (e.g. a confirmed dedicated button discovered on
+  real hardware), revisit whether the handshake becomes worth sending.

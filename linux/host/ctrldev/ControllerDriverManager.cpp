@@ -13,6 +13,16 @@
 #include "AkaiApcKey25Mk2.h"
 #include "AkaiApc40Mk2.h"
 #include "AkaiMpk249.h"
+#include "ArturiaKeyLab61Mk2.h"
+#include "NovationLaunchkeyMiniMk3.h"
+#include "NovationLaunchkeyMiniMk4.h"
+#include "NovationLaunchkeyMk3.h"
+#include "NovationLaunchkeyMk4.h"
+#include "NovationLaunchpadMini.h"
+#include "NovationLaunchpadMiniMk3.h"
+#include "NovationLaunchpadProMk2.h"
+#include "NovationLaunchpadProMk3.h"
+#include "NovationLaunchpadX.h"
 
 namespace s1::ctrldev {
 
@@ -29,7 +39,10 @@ struct Entry {
 // non-overlapping with AkaiApcKey25Mk2's (see AkaiApcKey25.cpp), so either
 // order is actually safe between those two, but a driver whose hints could
 // ever be a substring of another's should be listed after the more specific
-// one regardless.
+// one regardless. Same reasoning applies to every other mk1/mk2/mk3/mk4
+// pair in the Novation entries below -- each one's deviceNameHints() is
+// deliberately non-overlapping with its siblings' (see the individual
+// driver files).
 const Entry kDrivers[] = {
     {"akai-mpk-mini-mk3", makeAkaiMpkMiniMk3},
     {"akai-midimix", makeAkaiMidiMix},
@@ -37,6 +50,16 @@ const Entry kDrivers[] = {
     {"akai-apc-key25-mk2", makeAkaiApcKey25Mk2},
     {"akai-apc40-mk2", makeAkaiApc40Mk2},
     {"akai-mpk249", makeAkaiMpk249},
+    {"arturia-keylab-61-mk2", makeArturiaKeyLab61Mk2},
+    {"novation-launchkey-mini-mk3", makeNovationLaunchkeyMiniMk3},
+    {"novation-launchkey-mini-mk4-37", makeNovationLaunchkeyMiniMk4_37},
+    {"novation-launchkey-mk3-88", makeNovationLaunchkeyMk3_88},
+    {"novation-launchkey-mk4-37", makeNovationLaunchkeyMk4_37},
+    {"novation-launchpad-mini", makeNovationLaunchpadMini},
+    {"novation-launchpad-mini-mk3", makeNovationLaunchpadMiniMk3},
+    {"novation-launchpad-pro-mk2", makeNovationLaunchpadProMk2},
+    {"novation-launchpad-pro-mk3", makeNovationLaunchpadProMk3},
+    {"novation-launchpad-x", makeNovationLaunchpadX},
 };
 
 std::string toLower(std::string s) {

@@ -25,6 +25,16 @@ as expected.
 | Akai APC Key 25 mk2 | `akai-apc-key25-mk2` | Same mapping and transport buttons as the original APC Key 25 -- see [Akai APC Key 25 / mk2](#akai-apc-key-25--mk2). |
 | Akai APC40 mk2 | `akai-apc40-mk2` | Maps 19 knobs/faders to synth parameters (see [Akai APC40 mk2](#akai-apc40-mk2)); STOP ALL CLIPS/PLAY/RECORD are dedicated transport buttons; the clip-launch grid and per-track buttons play as plain notes. |
 | Akai MPK249 | `akai-mpk249` | Maps 24 knobs/faders to synth parameters -- **requires the device's onboard preset 25 ("MPK Generic")**, see [Akai MPK249](#akai-mpk249). No function pads; the keybed and pads play as plain notes. |
+| Arturia KeyLab mkII 61 | `arturia-keylab-61-mk2` | Automatically switches the device into "DAW mode" on startup so STOP/PLAY-PAUSE/RECORD/METRONOME work as dedicated transport buttons -- see [Arturia KeyLab mkII 61](#arturia-keylab-mkii-61). No knobs/faders mapped (none are documented); the keybed and pad grid play as plain notes. |
+| Novation Launchkey Mini mk3 | `novation-launchkey-mini-mk3` | Maps the 8 knobs to synth parameters -- see [Novation Launchkey family](#novation-launchkey-family). No function pads; the keybed and pads play as plain notes. |
+| Novation Launchkey MK3 88 | `novation-launchkey-mk3-88` | Maps the 8 knobs, 8 faders and master fader to synth parameters -- see [Novation Launchkey family](#novation-launchkey-family). No function pads. |
+| Novation Launchkey MK4 37 | `novation-launchkey-mk4-37` | Maps the 8 knobs to synth parameters -- see [Novation Launchkey family](#novation-launchkey-family). No function pads. |
+| Novation Launchkey Mini MK4 37 | `novation-launchkey-mini-mk4-37` | No knobs mapped -- this unit's knobs are confirmed relative-encoder output, which can't be mapped safely, see [Novation Launchkey family](#novation-launchkey-family). Device recognition only. |
+| Novation Launchpad Mini (mk1) | `novation-launchpad-mini` | No knobs, faders, or function pads exist on this device -- see [Novation Launchpad family](#novation-launchpad-family). Device recognition only; the grid plays as plain notes. |
+| Novation Launchpad X | `novation-launchpad-x` | Same as Launchpad Mini -- device recognition only, grid plays as plain notes -- see [Novation Launchpad family](#novation-launchpad-family). |
+| Novation Launchpad Mini mk3 | `novation-launchpad-mini-mk3` | Same as Launchpad Mini -- see [Novation Launchpad family](#novation-launchpad-family). |
+| Novation Launchpad Pro mk2 | `novation-launchpad-pro-mk2` | Switches into DAW mode on startup so STOP/PLAY/RECORD work as dedicated transport buttons -- see [Novation Launchpad family](#novation-launchpad-family). The grid plays as plain notes. |
+| Novation Launchpad Pro mk3 | `novation-launchpad-pro-mk3` | Same as Launchpad Mini -- see [Novation Launchpad family](#novation-launchpad-family). |
 
 Don't see your controller? It still works as a plain MIDI keyboard/controller
 -- see [Using it with an unsupported controller](#using-it-with-an-unsupported-controller)
@@ -291,6 +301,71 @@ presses with no way for this driver to turn that into a toggle, so binding
 them would only ever set a value once, never flip it back). The keybed and
 pads play as plain notes.
 
+## Arturia KeyLab mkII 61
+
+On startup, this driver switches the device into "DAW mode" (a two-message
+handshake) so its transport/track/global buttons report the note numbers it
+expects -- you don't need to do anything for this yourself, it happens
+automatically whenever the device's output port is connected.
+
+| Control | Maps to |
+| --- | --- |
+| STOP | Panic |
+| PLAY/PAUSE | Arp/Seq on-off |
+| RECORD | Switch between Arp mode and Sequencer mode |
+| METRONOME | All notes off |
+
+Not mapped: the 8 knobs, 8 faders and 8 toggle buttons in the device's
+mixing strip -- there's no confirmed protocol reference for what CCs they
+send, so bind them yourself with MIDI Learn if you want to use them. Also
+not mapped: the 8 SELECT buttons, the track SOLO/MUTE/RECORD ARM/READ/WRITE
+buttons, SAVE/PUNCH IN/PUNCH OUT/UNDO/NEXT/PREVIOUS/BANK, and the preset
++/- buttons -- none has a Synth One equivalent. The keybed and the 4x4 pad
+grid play as plain notes.
+
+## Novation Launchkey family
+
+All four Launchkey drivers automatically put the device into "session mode"
+on startup (an ordinary MIDI Note, not something you'd notice) so the knobs
+send the CCs each driver expects.
+
+| Controller | The 8 knobs | Sliders/master |
+| --- | --- | --- |
+| Launchkey Mini mk3 | Cutoff, resonance, attack, release, LFO 1 rate, reverb mix, delay mix, master volume | -- (no physical sliders) |
+| Launchkey MK3 88 | OSC1/OSC2 volume, OSC2 detune, sub volume, FM amount, noise volume, glide, OSC1/2 balance | 8 faders: cutoff, resonance, attack, release, LFO 1 rate, reverb mix, delay mix, arp rate. Master fader: master volume. |
+| Launchkey MK4 37 | Filter attack/decay/sustain/release, filter/amp env mix, envelope pitch tracking, amp decay, amp sustain | -- (no physical sliders) |
+| Launchkey Mini MK4 37 | **Not mapped** -- this unit's knobs report relative turns, not a position, which can't be translated into a parameter value safely. Bind them yourself with MIDI Learn if you want to use them. | -- |
+
+Not mapped on any of the four: the transport (Play/Record), navigation
+(track left/right, up/down), and per-channel chain buttons (select/mute/
+solo) -- all report as MIDI CC presses with no way for this driver framework
+to react to a press/release pair, so nothing is bound rather than
+half-implemented. The keybed and pads play as plain notes on all four.
+
+## Novation Launchpad family
+
+Five Launchpad devices are recognised. Four of them -- Launchpad Mini (the
+original), Launchpad X, Launchpad Mini mk3, and Launchpad Pro mk3 -- do
+**nothing beyond recognising the device**: no knobs exist on any of them to
+map, and none has a dedicated button this driver can safely turn into a
+useful function (their arrow/session buttons report as CC presses, the same
+limitation the Launchkey family's transport buttons have). The 8x8
+clip-launch grid plays as plain, ordinary notes on all of them, same as any
+unclaimed pad on any other supported controller.
+
+**Launchpad Pro mk2** is the exception: on startup, this driver switches it
+into DAW mode (an automatic SysEx handshake, nothing you need to do) so 3
+dedicated buttons work as transport controls:
+
+| Control | Maps to |
+| --- | --- |
+| STOP | Panic |
+| PLAY | Arp/Seq on-off |
+| RECORD | Switch between Arp mode and Sequencer mode |
+
+The clip-launch grid plays as plain notes here too, same as the rest of the
+family.
+
 ## How this interacts with MIDI Learn
 
 A driver's knob mapping is a *default*, not a lock:
@@ -349,10 +424,38 @@ check, not a bug report waiting to happen -- see the developer guide for
 why). For the MPK249 specifically: check the device is set to onboard preset
 25 ("MPK Generic") -- see [Akai MPK249](#akai-mpk249), this driver's CCs only
 apply to that preset and there's no way for it to select or confirm the
-preset for you. For any of the five fixed-CC drivers, a firmware or unit
-revision that reports different CCs than the confirmed reference this driver
-was built from would also produce this symptom. Either way, MIDI-Learn the
-knob yourself as a reliable fallback.
+preset for you. For the Arturia KeyLab mkII 61: the 8 knobs/8 faders/8
+toggles aren't mapped at all (see [Arturia KeyLab mkII 61](#arturia-keylab-mkii-61))
+-- this isn't a fault, there's simply no confirmed mapping to seed. For any
+of the fixed-CC drivers, a firmware or unit revision that reports different
+CCs than the confirmed reference this driver was built from would also
+produce this symptom. Either way, MIDI-Learn the knob yourself as a reliable
+fallback.
+
+**The Arturia KeyLab mkII 61's STOP/PLAY/RECORD/METRONOME buttons don't do
+anything.** The DAW-mode-entry handshake this driver sends on startup is
+unverified against real hardware -- if the device doesn't actually switch
+into DAW mode from those two messages, the buttons won't send the note
+numbers this driver expects. Check the status line doesn't show `(SysEx TX
+unavailable)` first (see above); if it doesn't, and the buttons still don't
+respond, that's a hardware/firmware mismatch worth reporting.
+
+**My Novation Launchkey's knobs don't respond.** If it's a Launchkey Mini
+MK4 37, this is expected -- see [Novation Launchkey family](#novation-launchkey-family),
+its knobs are never mapped. For the other three Launchkey models, check
+`(SysEx TX unavailable)` isn't shown (the session-mode handshake needs an
+output port the same way SysEx does, even though it's sent as a plain MIDI
+Note rather than SysEx) -- otherwise this is a firmware/unit mismatch with
+the confirmed CC reference this driver was built from.
+
+**My Novation Launchpad doesn't do anything beyond playing notes on the
+grid.** For four of the five supported Launchpads (everything except Pro
+mk2), that's correct, expected behavior, not a bug -- see
+[Novation Launchpad family](#novation-launchpad-family), none of them has
+knobs or a safely-mappable button. Only the Launchpad Pro mk2's STOP/PLAY/
+RECORD buttons are supposed to do something; if those don't work, check
+`(SysEx TX unavailable)` first, then see the Arturia entry just above for
+the same "unverified handshake" caveat.
 
 **Switching modes with PROG SELECT doesn't change what the knobs control.**
 The knobs should go briefly unresponsive and then pick up the new mode's
