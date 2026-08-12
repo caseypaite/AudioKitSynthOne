@@ -399,6 +399,11 @@ else()
         host/AudioBackend.cpp
         host/ctrldev/ControllerDriverManager.cpp
         host/ctrldev/AkaiMpkMiniMk3.cpp
+        host/ctrldev/AkaiMidiMix.cpp
+        host/ctrldev/AkaiApcKey25.cpp
+        host/ctrldev/AkaiApcKey25Mk2.cpp
+        host/ctrldev/AkaiApc40Mk2.cpp
+        host/ctrldev/AkaiMpk249.cpp
         ${S1_MIDI_SOURCE}
     )
     target_include_directories(synthone_host PUBLIC host host/ctrldev)
@@ -423,6 +428,37 @@ else()
     # that unconditional target.
     add_executable(pad_filter_test tools/pad_filter_test.cpp)
     target_link_libraries(pad_filter_test PRIVATE synthone_host)
+
+    # akai_midimix_test: exercises the Akai MIDI Mix driver's fixed CC-default
+    # seeding and its 3 claimed global buttons against synthetic data -- see
+    # tools/akai_midimix_test.cpp.
+    add_executable(akai_midimix_test tools/akai_midimix_test.cpp)
+    target_link_libraries(akai_midimix_test PRIVATE synthone_host)
+
+    # akai_apc_key25_test: exercises the Akai APC Key 25 (gen 1) driver's
+    # fixed CC-default seeding and its 3 claimed transport buttons against
+    # synthetic data -- see tools/akai_apc_key25_test.cpp.
+    add_executable(akai_apc_key25_test tools/akai_apc_key25_test.cpp)
+    target_link_libraries(akai_apc_key25_test PRIVATE synthone_host)
+
+    # akai_apc_key25_mk2_test: exercises the Akai APC Key 25 mk2 driver the
+    # same way -- see tools/akai_apc_key25_mk2_test.cpp.
+    add_executable(akai_apc_key25_mk2_test tools/akai_apc_key25_mk2_test.cpp)
+    target_link_libraries(akai_apc_key25_mk2_test PRIVATE synthone_host)
+
+    # akai_apc40_mk2_test: exercises the Akai APC40 mk2 driver's fixed
+    # CC-default seeding (including the deliberately-unbound relative/
+    # ambiguous controls) and its 3 claimed transport buttons against
+    # synthetic data -- see tools/akai_apc40_mk2_test.cpp.
+    add_executable(akai_apc40_mk2_test tools/akai_apc40_mk2_test.cpp)
+    target_link_libraries(akai_apc40_mk2_test PRIVATE synthone_host)
+
+    # akai_mpk249_test: exercises the Akai MPK249 driver's fixed CC-default
+    # seeding across its 3 bound knob/fader rows, and confirms the
+    # deliberately-unbound switch/transport CCs stay unbound -- see
+    # tools/akai_mpk249_test.cpp.
+    add_executable(akai_mpk249_test tools/akai_mpk249_test.cpp)
+    target_link_libraries(akai_mpk249_test PRIVATE synthone_host)
 
     add_executable(synthone host/main.cpp)
     target_link_libraries(synthone PRIVATE synthone_host)

@@ -20,6 +20,11 @@ as expected.
 | Controller | Driver name | What it does |
 | --- | --- | --- |
 | Akai MPK Mini mk3 | `akai-mpk-mini-mk3` | Maps the 8 knobs to synth parameters across 4 switchable modes (32 parameters reachable in total -- see [Switching modes](#switching-modes)). The keybed and 8 of the 16 pads play notes normally; the other 8 pads are dedicated transport/panel buttons -- see [Function pads](#function-pads). |
+| Akai MIDI Mix | `akai-midimix` | Maps all 24 knobs, 8 channel faders and the master fader to synth parameters, all at once (no modes -- see [Akai MIDI Mix](#akai-midi-mix)). SOLO/BANK L/BANK R are dedicated transport buttons; the 24 per-strip MUTE/SOLO/REC buttons play as plain notes. |
+| Akai APC Key 25 (original) | `akai-apc-key25` | Maps the 8 knobs to synth parameters. STOP ALL CLIPS/PLAY/RECORD are dedicated transport buttons; the keybed and the 40-pad clip-launch grid play as plain notes -- see [Akai APC Key 25 / mk2](#akai-apc-key-25--mk2). |
+| Akai APC Key 25 mk2 | `akai-apc-key25-mk2` | Same mapping and transport buttons as the original APC Key 25 -- see [Akai APC Key 25 / mk2](#akai-apc-key-25--mk2). |
+| Akai APC40 mk2 | `akai-apc40-mk2` | Maps 19 knobs/faders to synth parameters (see [Akai APC40 mk2](#akai-apc40-mk2)); STOP ALL CLIPS/PLAY/RECORD are dedicated transport buttons; the clip-launch grid and per-track buttons play as plain notes. |
+| Akai MPK249 | `akai-mpk249` | Maps 24 knobs/faders to synth parameters -- **requires the device's onboard preset 25 ("MPK Generic")**, see [Akai MPK249](#akai-mpk249). No function pads; the keybed and pads play as plain notes. |
 
 Don't see your controller? It still works as a plain MIDI keyboard/controller
 -- see [Using it with an unsupported controller](#using-it-with-an-unsupported-controller)
@@ -198,6 +203,94 @@ mix/rate, autopan amount/rate, and bitcrush rate:
 
 ![FX panel with K1-K8 marked next to the Mode 3 knobs they control](images/app-mode3-modulation.png)
 
+## Akai MIDI Mix
+
+This one has no SysEx and no modes -- all of it is mapped at once, the
+moment the driver loads:
+
+| Control | Maps to |
+| --- | --- |
+| Knob row 1 (top knob, all 8 strips) | OSC1/OSC2 volume, OSC2 detune, sub volume, FM amount, noise volume, glide, OSC1/2 balance |
+| Knob row 2 (middle knob, all 8 strips) | Filter attack/decay/sustain/release, filter/amp env mix, envelope pitch tracking, amp decay, amp sustain |
+| Knob row 3 (bottom knob, all 8 strips) | LFO 1 amount, LFO 2 rate/amount, phaser mix/rate, autopan amount/rate, bitcrush rate |
+| The 8 channel faders | Cutoff, resonance, attack, release, LFO 1 rate, reverb mix, delay mix, arp rate |
+| Master fader | Master volume |
+| SOLO button | Panic |
+| BANK LEFT button | Arp/Seq on-off |
+| BANK RIGHT button | Switch between Arp mode and Sequencer mode |
+
+The 24 per-strip MUTE/SOLO/REC buttons play as plain (very low) notes --
+this device has no keybed, and Synth One has no per-channel mixer concept
+for those buttons to control, so they're left alone rather than repurposed.
+
+## Akai APC Key 25 / mk2
+
+Both the original APC Key 25 and the mk2 use the same driver design (and, per
+Akai/Zynthian's own protocol reference, the identical fixed knob CCs and
+transport button notes) -- everything below applies to both.
+
+| Control | Maps to |
+| --- | --- |
+| The 8 knobs above the keybed | Cutoff, resonance, attack, release, LFO 1 rate, reverb mix, delay mix, master volume |
+| STOP ALL CLIPS | Panic |
+| PLAY | Arp/Seq on-off |
+| RECORD | Switch between Arp mode and Sequencer mode |
+
+The keybed and the 40-pad clip-launch grid below it play as plain notes --
+Synth One has no clip-launch concept for those pads to control. The 5 soft
+keys under the grid, the 8 track-select buttons above the knobs, and SHIFT
+are likewise left alone.
+
+## Akai APC40 mk2
+
+| Control | Maps to |
+| --- | --- |
+| The 8 "Device Control" knobs | Filter attack/decay/sustain/release, filter/amp env mix, envelope pitch tracking, amp decay, amp sustain |
+| The 8 "Track Control" knobs | OSC1/OSC2 volume, OSC2 detune, sub volume, FM amount, noise volume, glide, OSC1/2 balance |
+| Master fader | Master volume |
+| Crossfader | Stereo widen |
+| The 8 channel faders | Reverb mix -- **all 8 faders drive the same parameter.** This device sends the same CC number for every channel fader (only the MIDI channel says which one moved), and Synth One's controller-driver framework doesn't distinguish MIDI channel for this purpose, so it can only bind one target, not 8. |
+| STOP ALL CLIPS | Panic |
+| PLAY | Arp/Seq on-off |
+| RECORD | Switch between Arp mode and Sequencer mode |
+
+The Tempo knob and Cue Level knob are **not** mapped -- both report relative
+turns (or, for Cue Level, an ambiguous mix of relative and absolute
+depending on the source), which this driver framework can't translate into a
+parameter position safely, so they're left for MIDI Learn if you want them
+bound to something. The 40-pad clip-launch grid, the 5 per-track buttons
+(Record Arm/Solo/Activator/Track Selection/Track Stop), and everything else
+not listed above play as plain notes.
+
+## Akai MPK249
+
+**This driver requires your MPK249 to be set to its onboard preset 25
+("MPK Generic")** -- consult your unit's manual for how to select a program
+slot. There's no way for this driver to select or confirm that preset for
+you over MIDI, so if you're on a different preset (including the factory
+default), the knobs below will simply do nothing until you switch, or until
+you bind them yourself with MIDI Learn.
+
+The device's front-panel BANK A/B/C switch changes which CC numbers the same
+physical knobs send. Bank A and Bank B are both mapped (whichever bank is
+selected on the device is the only one that's actually sending anything, so
+having both mapped ahead of time is harmless); Bank C has no separate knob
+mapping in this driver.
+
+| Control | Maps to |
+| --- | --- |
+| The 8 knobs, Bank A | Cutoff, resonance, attack, release, LFO 1 rate, reverb mix, delay mix, master volume |
+| The 8 knobs, Bank B | Filter attack/decay/sustain/release, filter/amp env mix, envelope pitch tracking, amp decay, amp sustain |
+| The 8 faders | OSC1/OSC2 volume, OSC2 detune, sub volume, FM amount, noise volume, glide, OSC1/2 balance |
+
+Not mapped: the BANK A/B/C switches themselves (solo/mute/record-arm per
+channel strip on Zynthian's reference design -- Synth One has no per-channel
+mixer for them to control) and the dedicated Play/Stop/Record/Rewind/
+Fast-Forward/Loop transport buttons (these report as one-shot MIDI CC
+presses with no way for this driver to turn that into a toggle, so binding
+them would only ever set a value once, never flip it back). The keybed and
+pads play as plain notes.
+
 ## How this interacts with MIDI Learn
 
 A driver's knob mapping is a *default*, not a lock:
@@ -238,19 +331,28 @@ for (this varies by OS and driver version) -- see the developer guide for
 how to extend the name list.
 
 **The status line shows `(SysEx TX unavailable)`.**
-The driver found your controller's input port but couldn't find a matching
-output port to talk back to it -- so it can identify the device by name but
-can't run the SysEx query that discovers the knob CCs. The knobs will need
-manual MIDI Learn in this case. This can happen if only the input side of
-the device is connected (e.g. via `--midi` naming just one port) or if the
-in/out pairing heuristic doesn't recognise your specific device -- see the
-developer guide.
+Only relevant to the Akai MPK Mini mk3 -- the other five drivers (MIDI Mix,
+APC Key 25, APC Key 25 mk2, APC40 mk2, MPK249) send no SysEx at all, so this
+never appears for them and never affects whether their knobs work. For the
+MPK Mini mk3: the driver found your controller's input port but couldn't
+find a matching output port to talk back to it -- so it can identify the
+device by name but can't run the SysEx query that discovers the knob CCs.
+The knobs will need manual MIDI Learn in this case. This can happen if only
+the input side of the device is connected (e.g. via `--midi` naming just one
+port) or if the in/out pairing heuristic doesn't recognise your specific
+device -- see the developer guide.
 
 **Knobs don't respond even though the status line looks fine.**
-The query may not have gotten a reply in time, or the device's SysEx
-program dump didn't parse as expected (this is a defensive check, not a
-bug report waiting to happen -- see the developer guide for why). Either
-way, MIDI-Learn the knob yourself as a reliable fallback.
+For the MPK Mini mk3: the query may not have gotten a reply in time, or the
+device's SysEx program dump didn't parse as expected (this is a defensive
+check, not a bug report waiting to happen -- see the developer guide for
+why). For the MPK249 specifically: check the device is set to onboard preset
+25 ("MPK Generic") -- see [Akai MPK249](#akai-mpk249), this driver's CCs only
+apply to that preset and there's no way for it to select or confirm the
+preset for you. For any of the five fixed-CC drivers, a firmware or unit
+revision that reports different CCs than the confirmed reference this driver
+was built from would also produce this symptom. Either way, MIDI-Learn the
+knob yourself as a reliable fallback.
 
 **Switching modes with PROG SELECT doesn't change what the knobs control.**
 The knobs should go briefly unresponsive and then pick up the new mode's
@@ -262,14 +364,19 @@ the driver itself is working, then try 1-3. As always, MIDI Learn works
 regardless of mode switching.
 
 **A pad plays a note instead of doing its function, or the wrong pad does
-the wrong thing.** Function pads are only claimed once the driver's startup
-SysEx query completes -- if that never happens (see the "SysEx TX
-unavailable" and "Knobs don't respond" entries above; pad discovery shares
-the same query as the knobs), all 16 pads fall back to playing notes
-normally, since nothing claims them. If pads *are* claimed but the two rows
-seem swapped, that's the unverified table-order assumption described in
-[Function pads](#function-pads) above, not a bug to work around -- MIDI
-Learn doesn't apply here since these pads never reach the note path at all.
+the wrong thing.** On the Akai MPK Mini mk3, function pads are only claimed
+once the driver's startup SysEx query completes -- if that never happens
+(see the "SysEx TX unavailable" and "Knobs don't respond" entries above;
+pad discovery shares the same query as the knobs), all 16 pads fall back to
+playing notes normally, since nothing claims them. On the other four drivers
+with function pads (MIDI Mix, APC Key 25, APC Key 25 mk2, APC40 mk2), the
+claim happens unconditionally in `init()` with no query to fail, so this
+symptom would instead mean the device sent a note number this driver didn't
+expect -- see that driver's entry in the developer guide. If a pad *is*
+claimed but does the wrong thing, that's a documented, unverified-against-
+hardware assumption about note-to-function mapping, not a bug to work
+around -- MIDI Learn doesn't apply here since these pads never reach the
+note path at all.
 
 **No hotplug.** Controllers are matched once at startup against whatever's
 already connected when `synthone`/`synthone-gui` starts. Plugging a

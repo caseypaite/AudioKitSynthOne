@@ -8,6 +8,11 @@
 #include <cctype>
 
 #include "AkaiMpkMiniMk3.h"
+#include "AkaiMidiMix.h"
+#include "AkaiApcKey25.h"
+#include "AkaiApcKey25Mk2.h"
+#include "AkaiApc40Mk2.h"
+#include "AkaiMpk249.h"
 
 namespace s1::ctrldev {
 
@@ -20,8 +25,18 @@ struct Entry {
 
 // Compiled-in driver registry -- a small static table, not a plugin system,
 // mirroring AudioBackend.cpp's factory-table style. Add a new driver here.
+// Order matters for "auto" matching: AkaiApcKey25's hint list is deliberately
+// non-overlapping with AkaiApcKey25Mk2's (see AkaiApcKey25.cpp), so either
+// order is actually safe between those two, but a driver whose hints could
+// ever be a substring of another's should be listed after the more specific
+// one regardless.
 const Entry kDrivers[] = {
     {"akai-mpk-mini-mk3", makeAkaiMpkMiniMk3},
+    {"akai-midimix", makeAkaiMidiMix},
+    {"akai-apc-key25", makeAkaiApcKey25},
+    {"akai-apc-key25-mk2", makeAkaiApcKey25Mk2},
+    {"akai-apc40-mk2", makeAkaiApc40Mk2},
+    {"akai-mpk249", makeAkaiMpk249},
 };
 
 std::string toLower(std::string s) {

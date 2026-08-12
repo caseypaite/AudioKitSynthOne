@@ -632,6 +632,12 @@ default to matching on any channel, which degrades safely either way.
   the same way: hand-build a synthetic byte sequence matching your device's
   documented envelope and feed it through directly, no hardware needed for
   the *logic*, only for confirming the envelope itself is right.
+- **A driver with no SysEx** (all five in "Other Akai drivers" below) is
+  simpler to test than the MPK Mini mk3: there's no reply to synthesize,
+  just `init()` followed by `Engine::deviceDefaultForCc()` checks and, for
+  the three with claimed function pads, the same `onPadButton()` pattern
+  `pad_filter_test.cpp` uses. See `tools/akai_midimix_test.cpp` for the
+  shortest example of this shape.
 - **ALSA SysEx RX/TX plumbing** is, in principle, testable end-to-end with
   `amidi`/`aconnect`/`aseqdump` against a virtual ALSA client, injecting raw
   bytes with `amidi -p <port> -S "F0 ..."` and confirming they reach
@@ -703,6 +709,39 @@ this driver; validate against real hardware before writing to it, since a
 wrong write could alter what's stored on the device itself, not just what
 this driver reads.
 
+## Other Akai drivers: protocol references
+
+Five more Akai devices are supported, all simpler than the MPK Mini mk3
+above in the same way: none needs SysEx at all (their knobs/faders/buttons
+send fixed CC/note numbers in the device's default power-on state), so each
+`init()` seeds `Engine`'s device-default CC map directly from a compile-time
+table -- see the developer guide's "Adding a driver" step 4. Protocol facts
+for all five are transcribed from Zynthian's shipped drivers
+(`zyngine/ctrldev/zynthian_ctrldev_akai_*.py` on the `vangelis` branch of
+`zynthian/zynthian-ui`); the APC40 mk2's are additionally cross-checked
+against Akai's own published protocol document (cited in that driver's file
+header) -- none are independently validated against physical hardware in
+this project's development environment. Each driver's own file header has
+the full citation and design rationale; this table is a quick index.
+
+| Driver | Driver name | SysEx? | Function pads | Notable caveat |
+| --- | --- | --- | --- | --- |
+| `AkaiMidiMix.cpp` | `akai-midimix` | No | 3 (SOLO/BANK L/BANK R -> panic/arp on-off/arp\<->seq) | 24 per-strip MUTE/SOLO/REC buttons deliberately unclaimed -- no mixer-strip concept in Synth One |
+| `AkaiApcKey25.cpp` | `akai-apc-key25` | No | 3 (STOP ALL CLIPS/PLAY/RECORD -> panic/arp on-off/arp\<->seq) | Device-name hints are exact strings, not a bare "APC Key 25" substring, to avoid claiming mk2 hardware |
+| `AkaiApcKey25Mk2.cpp` | `akai-apc-key25-mk2` | No | Same 3, same notes as gen 1 | Shares gen 1's fixed knob CCs and transport notes byte-for-byte per Zynthian's own source |
+| `AkaiApc40Mk2.cpp` | `akai-apc40-mk2` | No | Same 3 transport notes as APC Key 25 | TRACK FADER shares one CC across all 8 physical faders (channel distinguishes which -- `Engine::mDeviceDefaultCc` is channel-blind, so only one target is bindable, not 8); TEMPO KNOB and CUE LEVEL deliberately unbound (relative/ambiguous per Akai's own doc) |
+| `AkaiMpk249.cpp` | `akai-mpk249` | No | None | **Requires the device's onboard preset #25 ("MPK Generic")** -- the CCs below only apply on that preset; 24 BANK A/B/C switch CCs and 6 TRANSPORT_\*\_CC constants are confirmed but deliberately unbound (see the file header: no per-channel-strip concept in Synth One, and no toggle-capable hook for a momentary CC) |
+
+None of the five claims the device's clip-launch grid, keybed, or generic
+pads as function pads -- only genuinely dedicated, single-purpose transport
+buttons are, mirroring the MPK Mini mk3's top-row precedent. Each driver's
+synthetic-data test tool (`tools/akai_midimix_test.cpp`,
+`akai_apc_key25_test.cpp`, `akai_apc_key25_mk2_test.cpp`,
+`akai_apc40_mk2_test.cpp`, `akai_mpk249_test.cpp`) exercises its
+`init()`-seeded CC table and any claimed function pads the same way
+`pad_filter_test.cpp` exercises the MPK Mini mk3 -- no hardware needed,
+since none of these five call `onSysEx()` at all.
+
 ## Known gaps / where to look before trusting this in production
 
 - WinMM SysEx RX/TX: implemented, not run on real Windows.
@@ -741,3 +780,18 @@ this driver reads.
   and by manual Linux + Windows(-cross-compiled) build verification, but --
   like the rest of the WinMM path above -- has not been run against real
   Windows MIDI hardware.
+- **None of the other five Akai drivers (MIDI Mix, APC Key 25, APC Key 25
+  mk2, APC40 mk2, MPK249) has been run against physical hardware either** --
+  see "Other Akai drivers: protocol references" above for each one's own
+  citation and caveats. All five's Windows device-name hints are unconfirmed
+  the same way the MPK Mini mk3's is.
+- **The MPK249 driver's entire CC table assumes the device is on its onboard
+  preset #25 ("MPK Generic")** -- there is no SysEx handshake to select or
+  confirm this from software, so a unit left on its factory default or any
+  other preset will send different CCs than this driver expects, and the
+  knobs will simply do nothing until MIDI-Learned manually. See
+  `AkaiMpk249.cpp`'s file header and the user guide.
+- **The APC40 mk2's TRACK FADER binds to only one target, not eight**, because
+  all 8 physical faders share a single CC (channel-blind `Engine::
+  mDeviceDefaultCc` can't tell them apart) -- see `AkaiApc40Mk2.cpp`'s file
+  header.
