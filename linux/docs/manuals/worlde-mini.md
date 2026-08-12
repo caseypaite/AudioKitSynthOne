@@ -9,7 +9,7 @@ Tuna Mini, Panda Mini, and Easykey.25, and this project doesn't have the
 exact unit this driver targets (ALSA client name `WORLDE MINI IN 1`, per
 Zynthian's own reference driver) in hand to photograph or confirm against.
 The layout shown -- 25 mini-keys, 8 pads, 8 knobs, 8 faders, pitch/mod
-strips -- matches the *class* of device this driver supports; treat the
+strips -- matches the class of device this driver supports; treat the
 photo as illustrative of "this style of budget controller," not a
 guaranteed match for your specific unit's silkscreen. Not affiliated with
 or endorsed by WORLDE.*
