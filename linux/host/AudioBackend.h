@@ -63,6 +63,37 @@ public:
 /// Names of the backends compiled into this binary, best first.
 std::vector<std::string> availableBackends();
 
+/// One output a backend can be pointed at.
+///
+/// `index` is the backend's own device id, meaningful only to the backend that
+/// listed it. kAutoDevice means "whatever the backend would have picked on its
+/// own", which is what every host used before the device could be chosen.
+struct OutputDevice {
+    int         index = -1;
+    std::string name;
+    std::string hostApi;              ///< driver family, for grouping in a picker
+    double      defaultSampleRate = 0.0;
+    int         maxChannels = 0;
+    bool        isDefault = false;    ///< the driver's own default output
+};
+
+constexpr int kAutoDevice = -1;
+
+/// Outputs the named backend can open. Never includes an "automatic" entry --
+/// callers that offer one should present kAutoDevice themselves, so the list
+/// stays a straight report of what the driver found.
+///
+/// Safe to call while a backend is open: PortAudio's init is reference counted.
+std::vector<OutputDevice> availableOutputDevices(const std::string &backend);
+
+/// Resolve what a user typed for --device against a device list: either a
+/// numeric index, or a case-insensitive substring of a device name. Returns
+/// false and fills `error` when nothing matches or a name is ambiguous.
+///
+/// "auto" (or an empty spec) selects kAutoDevice.
+bool resolveOutputDevice(const std::string &spec, const std::vector<OutputDevice> &devices,
+                         int &out, std::string &error);
+
 /// Create a backend by name. Returns nullptr and fills `error` if unavailable.
 ///
 /// `hostApi` narrows PortAudio to one of the driver families it wraps
@@ -70,11 +101,16 @@ std::vector<std::string> availableBackends();
 /// on Windows prefers WASAPI over the MME device PortAudio would otherwise
 /// default to. It is ignored by backends that wrap a single driver, i.e. JACK.
 ///
+/// `deviceIndex` pins the output to one device from availableOutputDevices();
+/// kAutoDevice keeps the old behaviour of letting the backend choose. An
+/// explicit device overrides `hostApi`, since the device already implies one.
+///
 /// `wasapiExclusive` (Windows only) asks PortAudio's WASAPI stream to bypass
 /// the shared-mode mixer -- the one route to genuinely low latency on
 /// Windows. Ignored outside WASAPI: a device on another host API, or another
 /// backend entirely, opens exactly as it would without the flag.
 std::unique_ptr<AudioBackend> makeBackend(const std::string &name, const std::string &hostApi,
-                                          bool wasapiExclusive, std::string &error);
+                                          int deviceIndex, bool wasapiExclusive,
+                                          std::string &error);
 
 } // namespace s1

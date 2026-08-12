@@ -10,7 +10,9 @@
 #include <atomic>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <string>
+#include <system_error>
 
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
@@ -22,6 +24,7 @@
 #include "MidiOutput.h"
 #include "AudioBackend.h"
 #include "Engine.h"
+#include "Json.h"
 #include "Panels.h"
 #include "Widgets.h"
 
@@ -41,6 +44,7 @@ public:
     }
     void arpBeatCounterDidChange(S1ArpBeatCounter counter) override {
         mUi.arpBeat = counter.beatCounter;
+        mUi.heldNoteCount = counter.heldNotesCount;
     }
     void playingNotesDidChange(PlayingNotes notes) override {
         int voices = 0;
@@ -154,7 +158,7 @@ void panelTabs(const char *id, const char *label, s1gui::Panel &current, s1gui::
                               : opposite ? ImColor(s1gui::color::kOnDim).Value
                                          : ImColor(s1gui::color::kTextDim).Value);
         ImGui::PushID(i);
-        if (ImGui::Button(s1gui::PanelName(panel), ImVec2(74, 0))) {
+        if (ImGui::Button(s1gui::PanelName(panel), s1gui::PanelTabSize())) {
             if (panel == other) {
                 other = current; // swap rather than show the same panel twice
             }
@@ -171,6 +175,98 @@ void panelTabs(const char *id, const char *label, s1gui::Panel &current, s1gui::
 
 } // namespace
 
+namespace {
+
+/// Where the chosen output is remembered between runs: the data directory that
+/// *holds* the preset directory, never the preset directory itself.
+///
+/// Two reasons it sits outside. Banks are saved as `<bank>.json` right there, so
+/// a bank innocently named "audio" would collide with this file and one would
+/// silently overwrite the other. And --user-dir moves where *presets* live,
+/// which is a different question from which speaker this machine uses -- the
+/// device must not follow a preset collection onto another box, so this path
+/// deliberately ignores that flag.
+/// Returned as a string, and every filesystem::path here is converted with an
+/// explicit .string(): on Windows path::value_type is wchar_t, so the implicit
+/// conversion that compiles on Linux is not available and neither is handing
+/// c_str() to fopen.
+std::string audioConfigPath() {
+    const std::filesystem::path presets(s1::Engine::defaultUserDataDir());
+    const std::filesystem::path root = presets.parent_path();
+    return ((root.empty() ? std::filesystem::path(".") : root) / "audio.json").string();
+}
+
+/// Device names come from the driver and are not ours to trust as JSON.
+std::string jsonEscape(const std::string &text) {
+    std::string out;
+    out.reserve(text.size());
+    for (const char c : text) {
+        switch (c) {
+            case '"':  out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\n': out += "\\n";  break;
+            case '\r': out += "\\r";  break;
+            case '\t': out += "\\t";  break;
+            default:   out += c;      break;
+        }
+    }
+    return out;
+}
+
+void loadAudioConfig(s1gui::UiState &ui) {
+    s1::JsonValue root;
+    std::string error;
+    if (!s1::JsonValue::parseFile(audioConfigPath(), root, error) || !root.isObject()) return;
+
+    if (root.contains("backend")) ui.audioBackend = root["backend"].asString(ui.audioBackend);
+    if (root.contains("deviceIndex")) ui.audioDeviceIndex = root["deviceIndex"].asInt(ui.audioDeviceIndex);
+    if (root.contains("sampleRate")) ui.audioSampleRate = root["sampleRate"].asInt(ui.audioSampleRate);
+    if (root.contains("bufferFrames")) ui.audioBufferFrames = root["bufferFrames"].asInt(ui.audioBufferFrames);
+
+    // A device id is only meaningful next to the name it had when it was saved:
+    // ids shift as devices come and go, and silently opening whatever now sits
+    // at that index is worse than falling back to automatic.
+    const std::string savedName = root["deviceName"].asString();
+    if (ui.audioDeviceIndex != s1::kAutoDevice && !savedName.empty()) {
+        bool matched = false;
+        for (const auto &device : s1::availableOutputDevices(ui.audioBackend)) {
+            if (device.index == ui.audioDeviceIndex && device.name == savedName) {
+                matched = true;
+                break;
+            }
+        }
+        if (!matched) ui.audioDeviceIndex = s1::kAutoDevice;
+    }
+}
+
+void saveAudioConfig(const s1gui::UiState &ui) {
+    std::string deviceName;
+    for (const auto &device : ui.audioDevices) {
+        if (device.index == ui.audioDeviceIndex) {
+            deviceName = device.name;
+            break;
+        }
+    }
+
+    std::string json = "{\n";
+    json += "  \"backend\": \"" + ui.audioBackend + "\",\n";
+    json += "  \"deviceIndex\": " + std::to_string(ui.audioDeviceIndex) + ",\n";
+    json += "  \"deviceName\": \"" + jsonEscape(deviceName) + "\",\n";
+    json += "  \"sampleRate\": " + std::to_string(ui.audioSampleRate) + ",\n";
+    json += "  \"bufferFrames\": " + std::to_string(ui.audioBufferFrames) + "\n";
+    json += "}\n";
+
+    const std::string path = audioConfigPath();
+    std::error_code ec;
+    std::filesystem::create_directories(std::filesystem::path(path).parent_path(), ec);
+    if (FILE *f = std::fopen(path.c_str(), "wb")) {
+        std::fwrite(json.data(), 1, json.size(), f);
+        std::fclose(f);
+    }
+}
+
+} // namespace
+
 int main(int argc, char **argv) {
     std::string backendName;
     std::string hostApi;
@@ -179,6 +275,11 @@ int main(int argc, char **argv) {
     std::string midiSpec = "all";
     std::string midiOutSpec;
     std::string tuningsPath = s1::Engine::defaultTuningsPath();
+    std::string deviceSpec;
+    bool backendGiven = false;
+    int  requestedRate = 0;
+    int  requestedFrames = 0;
+    bool listDevices = false;
     int windowWidth = 1440, windowHeight = 900;
     bool fullscreen = false;
     bool hideCursor = false;
@@ -200,9 +301,13 @@ int main(int argc, char **argv) {
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         auto next = [&]() -> std::string { return (i + 1 < argc) ? argv[++i] : std::string(); };
-        if (arg == "--backend") backendName = next();
+        if (arg == "--backend") { backendName = next(); backendGiven = true; }
         else if (arg == "--host-api") hostApi = next();
         else if (arg == "--wasapi-exclusive") wasapiExclusive = true;
+        else if (arg == "--device") deviceSpec = next();
+        else if (arg == "--rate") requestedRate = std::atoi(next().c_str());
+        else if (arg == "--buffer") requestedFrames = std::atoi(next().c_str());
+        else if (arg == "--list-devices") listDevices = true;
         else if (arg == "--resources") resourceDir = next();
         else if (arg == "--user-dir") userDir = next();
         else if (arg == "--midi") midiSpec = next();
@@ -225,6 +330,8 @@ int main(int argc, char **argv) {
         else if (arg == "-h" || arg == "--help") {
             std::printf("usage: synthone-gui [--backend jack|portaudio] [--host-api NAME]\n"
                         "       [--resources DIR] [--wasapi-exclusive]\n"
+                        "                    [--device INDEX|NAME] [--list-devices]\n"
+                        "                    [--rate HZ] [--buffer FRAMES]\n"
                         "                    [--midi CLIENT:PORT|all] [--midi-out CLIENT:PORT|all]\n"
                         "                    [--geometry WxH]\n"
                         "                    [--top PANEL] [--bottom PANEL]\n"
@@ -247,19 +354,49 @@ int main(int argc, char **argv) {
     }
     if (backendName.empty()) backendName = backends.front();
 
+    if (listDevices) {
+        for (const auto &device : s1::availableOutputDevices(backendName)) {
+            std::printf("  %3d  %-44s %-10s %6.0f Hz  %dch%s\n", device.index, device.name.c_str(),
+                        device.hostApi.c_str(), device.defaultSampleRate, device.maxChannels,
+                        device.isDefault ? "  [default]" : "");
+        }
+        return 0;
+    }
+
+    s1::Engine engine;
+    if (!userDir.empty()) engine.setUserDataDir(userDir);
+
+    // Audio preferences: the saved file is the baseline, anything given on the
+    // command line wins over it, and neither is written back until the dialog
+    // applies a change -- so a one-off --device does not become permanent.
+    s1gui::UiState ui;
+    ui.audioBackend = backendName;
+    loadAudioConfig(ui);
+    if (backendGiven) ui.audioBackend = backendName;
+    if (requestedRate > 0) ui.audioSampleRate = requestedRate;
+    if (requestedFrames > 0) ui.audioBufferFrames = requestedFrames;
+    if (!deviceSpec.empty()) {
+        s1gui::RefreshAudioDevices(ui);
+        std::string resolveError;
+        if (!s1::resolveOutputDevice(deviceSpec, ui.audioDevices, ui.audioDeviceIndex,
+                                     resolveError)) {
+            std::fprintf(stderr, "error: %s\n", resolveError.c_str());
+            return 1;
+        }
+    }
+
     std::string error;
-    auto backend = s1::makeBackend(backendName, hostApi, wasapiExclusive, error);
-    if (!backend || !backend->open(0, 0, 0.0, error)) {
+    auto backend = s1::makeBackend(ui.audioBackend, hostApi, ui.audioDeviceIndex, wasapiExclusive,
+                                   error);
+    if (!backend || !backend->open(ui.audioSampleRate, ui.audioBufferFrames, 0.0, error)) {
         std::fprintf(stderr, "error: %s\n", error.c_str());
         return 1;
     }
 
-    s1::Engine engine;
     if (!engine.start(backend->sampleRate(), 2, resourceDir, error)) {
         std::fprintf(stderr, "error: %s\n", error.c_str());
         return 1;
     }
-    if (!userDir.empty()) engine.setUserDataDir(userDir);
     if (!engine.loadBanks(error)) {
         std::fprintf(stderr, "warning: %s\n", error.c_str());
     }
@@ -267,7 +404,6 @@ int main(int argc, char **argv) {
         std::fprintf(stderr, "warning: tunings: %s\n", error.c_str());
     }
 
-    s1gui::UiState ui;
     ui.layoutOverride = layoutOverride;
     if (!topPanelName.empty()) panelByName(topPanelName, ui.topPanel);
     if (!bottomPanelName.empty()) panelByName(bottomPanelName, ui.bottomPanel);
@@ -318,16 +454,87 @@ int main(int argc, char **argv) {
     // The srate callback runs on JACK's notification thread and must not
     // block or allocate, so it only records the new rate; the actual
     // reinitialization happens in the UI loop below, with the stream stopped
-    // so it can never race the render callback.
+    // so it can never race the render callback. applyAudio() below builds a
+    // fresh backend object on every device change, so this has to be
+    // reinstalled on it too, not just the one created here.
     std::atomic<double> pendingSampleRate{0.0};
-    backend->setSampleRateChangeCallback([&pendingSampleRate](double newRate) {
-        pendingSampleRate.store(newRate, std::memory_order_relaxed);
-    });
+    auto installSrateCallback = [&pendingSampleRate](s1::AudioBackend &b) {
+        b.setSampleRateChangeCallback([&pendingSampleRate](double newRate) {
+            pendingSampleRate.store(newRate, std::memory_order_relaxed);
+        });
+    };
+    installSrateCallback(*backend);
 
     if (!backend->start(render, error)) {
         std::fprintf(stderr, "error: %s\n", error.c_str());
         return 1;
     }
+
+    auto describeAudio = [&backend]() {
+        char buf[320];
+        std::snprintf(buf, sizeof(buf), "%s  %s   %.0f Hz / %u frames", backend->name(),
+                      backend->description().c_str(), backend->sampleRate(),
+                      backend->bufferFrames());
+        return std::string(buf);
+    };
+    ui.audioStatus = describeAudio();
+
+    // The DSP is built for one sample rate: the wavetable increments, envelope
+    // rates and LFO phases all derive from it, so changing rate means building
+    // the kernel again and putting the preset and tuning back.
+    auto rebuildEngine = [&](double rate) {
+        std::string rebuildError;
+        if (!engine.start(rate, 2, resourceDir, rebuildError)) return false;
+        const int tuning = engine.currentTuningIndex();
+        if (tuning >= 0) engine.applyTuning(tuning);
+        if (!ui.currentBank.empty()) {
+            std::string ignored;
+            engine.applyPreset(ui.currentBank, ui.currentPreset, ignored);
+        }
+        return true;
+    };
+
+    // Reopen the stream on the device the dialog chose. Every failure path ends
+    // with the synth audible on the device it had before, because a mistyped
+    // device is a much smaller problem than a synth that has gone silent.
+    auto applyAudio = [&]() {
+        const double previousRate = engine.sampleRate();
+        backend->stop();
+        engine.allNotesOff();
+
+        std::string applyError;
+        auto next = s1::makeBackend(ui.audioBackend, hostApi, ui.audioDeviceIndex, wasapiExclusive,
+                                    applyError);
+        if (next && next->open(ui.audioSampleRate, ui.audioBufferFrames, 0.0, applyError)) {
+            installSrateCallback(*next);
+            const bool rateChanged = next->sampleRate() != previousRate;
+            if (!rateChanged || rebuildEngine(next->sampleRate())) {
+                if (next->start(render, applyError)) {
+                    backend = std::move(next);
+                    ui.audioStatus = describeAudio();
+                    ui.notify("audio: " + ui.audioStatus);
+                    saveAudioConfig(ui);
+                    return;
+                }
+                // The new stream refused to start after the kernel had already
+                // moved: put the kernel back before falling through.
+                if (rateChanged) rebuildEngine(previousRate);
+            } else {
+                applyError = "could not rebuild the DSP at " +
+                             std::to_string(static_cast<int>(next->sampleRate())) + " Hz";
+                rebuildEngine(previousRate);
+            }
+        }
+
+        std::string restartError;
+        if (backend->start(render, restartError)) {
+            ui.notify("audio: " + applyError + " -- kept the previous device");
+        } else {
+            ui.notify("audio: " + applyError + "; the previous device also failed: " +
+                      restartError);
+        }
+        ui.audioStatus = describeAudio();
+    };
 
     // -- window ------------------------------------------------------------
 
@@ -338,10 +545,6 @@ int main(int argc, char **argv) {
         std::fprintf(stderr, "error: cannot initialise GLFW\n");
         return 1;
     }
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 2);
-    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-
     // Kiosk mode: take the primary monitor at its current resolution unless a
     // --geometry was asked for. On the Pi's 7" panel that is 800x480, and with
     // no window manager running there is nothing else to yield the screen to.
@@ -362,10 +565,58 @@ int main(int argc, char **argv) {
         }
     }
 
-    GLFWwindow *window =
-        glfwCreateWindow(windowWidth, windowHeight, "AudioKit Synth One", monitor, nullptr);
+    // GL 3.2 core is what the ImGui backend is happiest on, but it is not
+    // available everywhere: the Raspberry Pi 4's V3D driver tops out at
+    // OpenGL 3.1 (Mesa 24.2 on Bookworm), and asking for 3.2 core there does
+    // not degrade -- glfwCreateWindow fails outright with GLXBadFBConfig and
+    // the kiosk dies two seconds after every start.
+    //
+    // So try the tiers in order and keep the first that gives a window. The
+    // GLSL string has to move with the context: #version 150 *is* GL 3.2, and
+    // leaving it behind on a 3.1 context would only move the failure into
+    // shader compilation.
+    struct GlTier {
+        int         major;
+        int         minor;
+        int         profile;
+        const char *glsl;
+    };
+    static const GlTier kGlTiers[] = {
+        {3, 2, GLFW_OPENGL_CORE_PROFILE, "#version 150"},
+        {3, 1, GLFW_OPENGL_ANY_PROFILE,  "#version 140"},
+    };
+
+    // Failing a tier is expected, not news, so the error callback is muted
+    // while probing -- otherwise every Pi boot logs a GLXBadFBConfig that
+    // looks like the fault and is not. Whatever survives is reported below.
+    GLFWerrorfun previousErrorCallback = glfwSetErrorCallback(nullptr);
+
+    GLFWwindow *window = nullptr;
+    const char *glslVersion = kGlTiers[0].glsl;
+    std::string lastGlError;
+    for (const GlTier &tier : kGlTiers) {
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, tier.major);
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, tier.minor);
+        glfwWindowHint(GLFW_OPENGL_PROFILE, tier.profile);
+
+        window = glfwCreateWindow(windowWidth, windowHeight, "AudioKit Synth One", monitor,
+                                  nullptr);
+        if (window != nullptr) {
+            glslVersion = tier.glsl;
+            break;
+        }
+        // Take the error so the next attempt starts clean, and keep the text
+        // in case this was the last tier.
+        const char *text = nullptr;
+        glfwGetError(&text);
+        lastGlError = text != nullptr ? text : "unknown error";
+    }
+
+    glfwSetErrorCallback(previousErrorCallback);
+
     if (window == nullptr) {
-        std::fprintf(stderr, "error: cannot create a window\n");
+        std::fprintf(stderr, "error: cannot create a window; no usable OpenGL context (%s)\n",
+                     lastGlError.c_str());
         glfwTerminate();
         return 1;
     }
@@ -382,7 +633,7 @@ int main(int argc, char **argv) {
     ImGui::GetIO().IniFilename = nullptr; // don't litter the cwd
     applyDarkStyle();
     ImGui_ImplGlfw_InitForOpenGL(window, true);
-    ImGui_ImplOpenGL3_Init("#version 150");
+    ImGui_ImplOpenGL3_Init(glslVersion);
 
     // -- loop --------------------------------------------------------------
 
@@ -419,6 +670,15 @@ int main(int argc, char **argv) {
         const bool wantCompact = (ui.layoutOverride >= 0)
                                      ? (ui.layoutOverride == 1)
                                      : (viewport->WorkSize.x < 1000.0f || viewport->WorkSize.y < 620.0f);
+        // How much bigger than the 800x480 baseline this panel is, taken from
+        // whichever axis is tightest so nothing overflows the other one. The
+        // Waveshare 7" (1024x600) lands at 1.25; the official 7" panel stays at
+        // 1.0. Capped because past about 1.5 the block flow starts leaving
+        // whole shelves empty again, which is the problem it exists to fix.
+        const float roomScale =
+            std::min({viewport->WorkSize.x / 800.0f, viewport->WorkSize.y / 480.0f, 1.5f});
+        s1gui::SetCompactScale(roomScale);
+
         if (wantCompact != ui.compact) {
             ui.compact = wantCompact;
             applySpacing(ui.compact);
@@ -491,7 +751,15 @@ int main(int argc, char **argv) {
         }
 
         s1gui::DrawSaveDialog(engine, ui);
+        s1gui::DrawAudioDialog(ui);
         ImGui::End();
+
+        // Between frames, never inside one: reopening the stream tears down the
+        // realtime thread the render callback runs on.
+        if (ui.audioApplyRequested) {
+            ui.audioApplyRequested = false;
+            applyAudio();
+        }
 
         // On-screen keyboard note tracking: send note on/off as the pointer
         // moves across keys, through the same queue as hardware MIDI.

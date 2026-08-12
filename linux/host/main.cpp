@@ -39,6 +39,8 @@ void handleSignal(int) { gRunning.store(false); }
         "  --backend NAME     audio backend: jack | portaudio (default: first available)\n"
         "  --host-api NAME    PortAudio driver family (wasapi, directsound, mme, alsa...);\n"
         "                     default prefers WASAPI on Windows, the system default elsewhere\n"
+        "  --device SPEC      output device: an index from --list-devices, part of a\n"
+        "                     device name, or 'auto' (default: let the backend choose)\n"
 #ifdef _WIN32
         "  --wasapi-exclusive bypass the shared-mode mixer for lower latency (WASAPI only;\n"
         "                     falls back to shared mode if the device refuses it)\n"
@@ -66,6 +68,7 @@ void handleSignal(int) { gRunning.store(false); }
         "  --list-params      list settable parameter names, then exit\n"
         "  --list-midi        list MIDI sources, then exit\n"
         "  --list-midi-out    list MIDI destinations, then exit\n"
+        "  --list-devices     list audio output devices, then exit\n"
         "  --quiet            do not print the running status line\n"
         "\n"
         "Notes are played over MIDI. Ctrl-C to quit.\n";
@@ -139,8 +142,10 @@ int main(int argc, char **argv) {
     double requestedRate = 0;
     uint32_t requestedFrames = 0;
     double requestedLatencySec = 0.0;
+    std::string deviceSpec;
     bool listPresets = false, listParams = false, listMidi = false, listMidiOut = false,
          quiet = false;
+    bool listDevices = false;
     bool wasapiExclusive = false;
     int testNote = -1;
     std::vector<std::pair<std::string, float>> overrides;
@@ -167,6 +172,8 @@ int main(int argc, char **argv) {
         else if (arg == "--list-params") listParams = true;
         else if (arg == "--list-midi") listMidi = true;
         else if (arg == "--list-midi-out") listMidiOut = true;
+        else if (arg == "--device") deviceSpec = next();
+        else if (arg == "--list-devices") listDevices = true;
         else if (arg == "--quiet") quiet = true;
         else if (arg == "--test-note") testNote = std::stoi(next());
         else if (arg == "--set") {
@@ -191,6 +198,24 @@ int main(int argc, char **argv) {
         return 0;
     }
 
+    if (listDevices) {
+        std::string listBackend = backendName;
+        if (listBackend.empty()) {
+            const auto backends = s1::availableBackends();
+            if (backends.empty()) {
+                std::cerr << "error: this build has no audio backend compiled in\n";
+                return 1;
+            }
+            listBackend = backends.front();
+        }
+        for (const auto &device : s1::availableOutputDevices(listBackend)) {
+            std::printf("  %3d  %-44s %-10s %6.0f Hz  %dch%s\n", device.index, device.name.c_str(),
+                        device.hostApi.c_str(), device.defaultSampleRate, device.maxChannels,
+                        device.isDefault ? "  [default]" : "");
+        }
+        return 0;
+    }
+
     // -- audio backend -----------------------------------------------------
     //
     // Listing presets or parameters needs no audio hardware, so the backend is
@@ -211,7 +236,15 @@ int main(int argc, char **argv) {
         }
         if (backendName.empty()) backendName = backends.front();
 
-        backend = s1::makeBackend(backendName, hostApi, wasapiExclusive, error);
+        int deviceIndex = s1::kAutoDevice;
+        if (!deviceSpec.empty() &&
+            !s1::resolveOutputDevice(deviceSpec, s1::availableOutputDevices(backendName),
+                                     deviceIndex, error)) {
+            std::cerr << "error: " << error << "\n";
+            return 1;
+        }
+
+        backend = s1::makeBackend(backendName, hostApi, deviceIndex, wasapiExclusive, error);
         if (!backend) {
             std::cerr << "error: " << error << "\n";
             return 1;

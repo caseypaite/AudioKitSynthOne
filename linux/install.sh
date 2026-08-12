@@ -175,6 +175,8 @@ if [ "$ACTION" = uninstall ]; then
                 rm -f "$KIOSK_STATE"
             fi
             say "kept $KIOSK_CONF"
+            rm -f /etc/security/limits.d/synthone-audio.conf \
+                && say "removed /etc/security/limits.d/synthone-audio.conf" || true
         fi
     fi
     rm -f "$KIOSK_LAUNCHER" 2>/dev/null && say "removed $KIOSK_LAUNCHER" || true
@@ -370,6 +372,26 @@ if [ "$KIOSK" -eq 1 ]; then
         "$HERE/kiosk/synthone-kiosk.service" > "$KIOSK_UNIT"
     chmod 644 "$KIOSK_UNIT"
     say "unit -> $KIOSK_UNIT"
+
+    # -- real-time scheduling limits -----------------------------------------
+    #
+    # The kiosk unit sets LimitRTPRIO=95 per-process, but PAM-based limits
+    # in /etc/security/limits.d also cover sessions started by other means
+    # (e.g. running synthone by hand from an SSH session). Written once;
+    # a re-install keeps the existing file.
+    AUDIO_LIMITS="/etc/security/limits.d/synthone-audio.conf"
+    if [ -f "$AUDIO_LIMITS" ]; then
+        say "kept the existing $AUDIO_LIMITS"
+    else
+        cat > "$AUDIO_LIMITS" <<LIMITS
+# AudioKit Synth One - real-time scheduling for the audio group.
+# Written by install.sh --kiosk. Safe to remove if the kiosk is uninstalled.
+@audio - rtprio  95
+@audio - memlock unlimited
+LIMITS
+        chmod 644 "$AUDIO_LIMITS"
+        say "audio limits -> $AUDIO_LIMITS"
+    fi
 
     # -- take the machine over -----------------------------------------------
     #

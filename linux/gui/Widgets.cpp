@@ -67,6 +67,8 @@ bool gCompactWidgets = false;
 // Smallest compact knob face. Panels with room to spare raise it; see
 // SetCompactKnobFloor.
 float gCompactKnobFloor = 32.0f;
+// 1.0 == the 800x480 baseline compact was drawn for. See SetCompactScale.
+float gCompactScale = 1.0f;
 
 /// Height of the label + readout block above a knob face.
 float knobLabelBlock() { return gCompactWidgets ? 20.0f : 28.0f; }
@@ -106,6 +108,21 @@ bool LearnMode() { return gLearnMode; }
 void SetCompactWidgets(bool on) { gCompactWidgets = on; }
 bool CompactWidgets() { return gCompactWidgets; }
 
+void  SetCompactScale(float scale) { gCompactScale = std::max(1.0f, scale); }
+float CompactScale() { return gCompactScale; }
+
+ImVec2 PanelTabSize() {
+    // 74x(frame height) was sized for 800x480, where six tabs plus the "PANEL"
+    // caption just fit the width. A roomier panel can afford more, and these
+    // are the controls most often hit with a fingertip, so they take the scale
+    // in both axes rather than only growing wider.
+    const float width = std::round(74.0f * (gCompactWidgets ? gCompactScale : 1.0f));
+    const float height = gCompactWidgets
+                             ? std::round(ImGui::GetFrameHeight() * gCompactScale)
+                             : 0.0f;   // 0 == natural frame height
+    return ImVec2(width, height);
+}
+
 // 0.70 takes the standard 46px face to 32px and the emphasis 58px to 41px,
 // which is what lets the busiest panel (FX: four sections, thirty controls)
 // finish above the fold. The floor stops a knob becoming a dot on some future
@@ -124,7 +141,16 @@ float KnobDiameter(float requested) {
     // the height of its whole row. Uniform cells buy a row back on FX, and the
     // emphasis reads poorly at this scale anyway.
     if (!gCompactWidgets) return requested;
-    return std::max(gCompactKnobFloor, std::min(requested, 46.0f) * 0.70f);
+    // The scale lifts both the floor and the shrunk face, so a panel that set
+    // its own floor (MAIN asks for 72px) grows with the display too.
+    //
+    // Deliberately not capped at `requested`: that is the desktop size, chosen
+    // for a mouse, and capping there left a 1024x600 panel with 200px of dead
+    // space below the last shelf. A finger is a coarser instrument than a
+    // pointer, so a touch panel with room to spare is right to draw larger
+    // than the desktop does.
+    const float shrunk = std::max(gCompactKnobFloor, std::min(requested, 46.0f) * 0.70f);
+    return std::round(shrunk * gCompactScale);
 }
 
 void SetCompactKnobFloor(float px) { gCompactKnobFloor = px; }
@@ -645,7 +671,8 @@ bool TouchPadXY(const char *id, const ImVec2 &size, float &x, float &y, bool lat
     return changed;
 }
 
-bool SequencerGrid(s1::Engine &engine, int totalSteps, int currentStep, const ImVec2 &size) {
+bool SequencerGrid(s1::Engine &engine, int totalSteps, int currentStep, int heldNotes,
+                   const ImVec2 &size) {
     bool changed = false;
 
     constexpr int kSteps = 16;
@@ -663,6 +690,27 @@ bool SequencerGrid(s1::Engine &engine, int totalSteps, int currentStep, const Im
                         ImGui::GetTextLineHeightWithSpacing();
     const float sliderH = size.y > 0.0f ? std::max(40.0f, size.y - fixed) : 64.0f;
 
+    // Which step is lit, transcribed from SequencerPanelController.updateLED:
+    //
+    //     if arpIsOn && arpIsSequencer && seqTotalSteps > 0 {
+    //         let notePosition = (beatCounter + seqTotalSteps) % seqTotalSteps
+    //         if heldNotes != 0 { light notePosition } else { light 0 }
+    //     }
+    //
+    // Two things that condition is carrying. S1Sequencer::getArpBeatCount()
+    // hands out a free-running counter -- mBeatTime over the tempo multiplier,
+    // which nothing ever folds back, so a single held note walks it into the
+    // hundreds; wrapping it is the UI's job. And the counter stops being
+    // reported the moment the last note is released, so without the held-note
+    // test the LED would sit frozen on whichever step it happened to reach.
+    const bool arpOn = engine.getParameter(arpIsOn) > 0.0f;
+    const bool isSequencer = engine.getParameter(arpIsSequencer) > 0.0f;
+
+    int litStep = -1;
+    if (arpOn && isSequencer && totalSteps > 0) {
+        litStep = heldNotes != 0 ? ((currentStep % totalSteps) + totalSteps) % totalSteps : 0;
+    }
+
     ImGui::BeginGroup();
     ImGui::TextColored(ImColor(color::kTextDim), "STEP");
     for (int i = 0; i < kSteps; ++i) {
@@ -671,7 +719,7 @@ bool SequencerGrid(s1::Engine &engine, int totalSteps, int currentStep, const Im
         ImGui::PushID(i);
 
         const bool inRange = i < totalSteps;
-        const bool playing = (i == currentStep);
+        const bool playing = (i == litStep);
 
         // Step-position LED
         const ImVec2 ledPos = ImGui::GetCursorScreenPos();

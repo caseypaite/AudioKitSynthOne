@@ -10,7 +10,13 @@
 
 #include <jack/jack.h>
 
+#include <atomic>
 #include <cstring>
+
+#ifndef _WIN32
+#  include <pthread.h>
+#  include <sched.h>
+#endif
 
 namespace s1 {
 
@@ -113,6 +119,19 @@ private:
     }
 
     int process(jack_nframes_t frames) {
+        // JACK normally runs its process callback at RT priority already, but
+        // only if JACK itself was granted it. Request SCHED_FIFO explicitly so
+        // the behaviour is identical whether JACK has RT or not.
+#ifndef _WIN32
+        if (!mRtSet.exchange(true, std::memory_order_relaxed)) {
+            struct sched_param sp{};
+            sp.sched_priority = 95;
+            pthread_setschedparam(pthread_self(), SCHED_FIFO, &sp);
+            // Ignore the return: JACK may have already done this, or the
+            // user may not have audio limits configured. Either way, audio runs.
+        }
+#endif
+
         auto *left = static_cast<float *>(jack_port_get_buffer(mLeft, frames));
         auto *right = static_cast<float *>(jack_port_get_buffer(mRight, frames));
         if (left == nullptr || right == nullptr) return 0;
@@ -147,10 +166,27 @@ private:
     uint32_t       mBufferFrames = 256;
     bool           mActive = false;
     std::string    mConnected;
+#ifndef _WIN32
+    std::atomic<bool> mRtSet{false};
+#endif
 };
 
 std::unique_ptr<AudioBackend> makeJackBackend() {
     return std::make_unique<JackBackend>();
+}
+
+/// JACK has nothing to choose between: the server owns the hardware and decides
+/// the rate and buffer size, and where our ports go is a patchbay question, not
+/// a device one. One entry keeps the picker honest rather than pretending
+/// otherwise.
+std::vector<OutputDevice> jackOutputDevices() {
+    OutputDevice device;
+    device.index = kAutoDevice;
+    device.name = "JACK server";
+    device.hostApi = "JACK";
+    device.maxChannels = 2;
+    device.isDefault = true;
+    return {device};
 }
 
 } // namespace s1

@@ -98,6 +98,27 @@ the mono/poly note state and the tuning table all survive the switch, though
 audio drops out for the moment it takes to happen. PortAudio negotiates a
 fixed rate at startup and never needs this.
 
+`--list-devices` prints the outputs the chosen backend can open, and `--device`
+picks one -- by index, or by any unambiguous part of its name:
+
+```bash
+./build/synthone --backend portaudio --list-devices
+    0  HD-Audio Generic: HDMI 0 (hw:0,3)   ALSA   44100 Hz  8ch
+    1  pipewire                            ALSA   44100 Hz  128ch
+    2  default                             ALSA   44100 Hz  128ch  [default]
+
+./build/synthone --backend portaudio --device 0        # by index
+./build/synthone --backend portaudio --device HDMI     # by name
+```
+
+Without `--device` the backend chooses, which is the sound server's default
+output. Naming a hardware device (`hw:1,0`) instead opens the card directly and
+bypasses PipeWire/PulseAudio altogether -- useful when the server's routing is
+the thing you are trying to rule out. Note the indices are not stable: they
+shift as devices appear and disappear, so prefer a name in anything you script.
+JACK has nothing to select, since the server owns the hardware and where the
+ports go is a patchbay question; it reports a single entry.
+
 On PortAudio the output latency follows `--buffer` -- one period, which is the
 floor a callback API can offer:
 
@@ -297,6 +318,38 @@ journalctl -u synthone-kiosk -f            # watch it come up
 It needs `xserver-xorg` and `xinit` (`apt install xserver-xorg xinit`) -- an X
 server, but no desktop on top of it.
 
+#### Get the panel overlay right first
+
+Tested end to end on a **Raspberry Pi 4 Model B, Raspberry Pi OS Bookworm
+(arm64), driving a Waveshare 7" DSI LCD (C) at 1024x600** -- the I2C-controlled
+variant. That panel needs its own overlay in `/boot/firmware/config.txt`:
+
+```
+dtoverlay=vc4-kms-dsi-waveshare-panel,7_0_inchC
+```
+
+Use the overlay that matches the panel, and only that one. Driving a Waveshare
+panel with the *official* display's overlay (`dtoverlay=vc4-kms-dsi-7inch`)
+fails in a way that wastes an afternoon: the DSI data lanes still work, so the
+panel is detected, takes a mode and renders -- but the official overlay binds
+`rpi_touchscreen_attiny` at 0x45, a chip a Waveshare panel does not have. Every
+backlight call then goes to a device that is not there:
+
+```
+panel-simple ...: [drm:drm_panel_enable] failed to enable backlight: -5
+```
+
+The result is a correctly rendered, permanently unlit screen -- indistinguishable
+from a dead display or a bad ribbon cable. `i2cget -y -f 10 0x45 0x86` returning
+`Read failed`, with the panel otherwise working, is the tell. Note also that
+`display_auto_detect=1` cannot rescue this: auto-detection identifies the panel
+over that same I2C link, so with no explicit overlay a Waveshare panel comes up
+with no DSI connector at all.
+
+The GUI adapts to whatever the panel reports, so 1024x600 gets larger knobs and
+tabs than 800x480 automatically -- see [Designing for
+800x480](#designing-for-800x480).
+
 There is no login prompt and no autologin getty to configure: the unit runs as
 the configured user under `PAMName=login`, so `logind` opens a real session for
 them -- `XDG_RUNTIME_DIR`, user services and all -- with no password and no
@@ -330,7 +383,7 @@ reinstalls:
 | Key | Default | Notes |
 | --- | --- | --- |
 | `BACKEND` | `portaudio` | ALSA directly, nothing to start first. `jack` if you run a server. |
-| `GEOMETRY` | empty | Empty fills the panel; the official 7" display is `800x480`. |
+| `GEOMETRY` | empty | Empty fills the panel: `800x480` on the official 7" display, `1024x600` on the Waveshare 7" (C). |
 | `TOP` / `BOTTOM` | empty | Which panel opens first: `MAIN ENV PAD FX SEQ TUNE`. |
 | `MIDI` | `all` | ALSA source as `CLIENT:PORT`, or everything. |
 | `HIDE_CURSOR` | `1` | Pointer off, for a touch panel. |
@@ -351,6 +404,118 @@ To take the kiosk off without removing the app:
 ```sh
 sudo systemctl disable --now synthone-kiosk
 ```
+
+### Performance on Raspberry Pi 4
+
+Tested on a **Pi 4 Model B, Raspberry Pi OS Bookworm arm64,
+kernel 6.12.96+rpt-rpi-v8 (PREEMPT)**.
+
+#### Real-time audio thread
+
+The audio callback thread raises itself to **SCHED_FIFO priority 95** on its
+first invocation — the first moment it is certain to be on the correct thread.
+`--kiosk` enables this with two changes that work together:
+
+- The systemd unit carries `LimitRTPRIO=95` and `LimitMEMLOCK=infinity`, which
+  allow the process to escalate its own priority without root.
+- `install.sh --kiosk` writes `/etc/security/limits.d/synthone-audio.conf`
+  granting the same rights to the `audio` group, so manual runs over SSH work
+  too.
+
+Confirmed after install with `chrt -p <tid>`:
+
+```
+tid 1550  synthone  SCHED_FIFO  pri 95   ← audio callback thread
+tid 1549  synthone  SCHED_OTHER pri 0    ← MIDI thread
+tid 1545  synthone  SCHED_OTHER pri 0    ← main thread
+```
+
+The key metric is **scheduler wait time** — the time the RT thread spent ready
+but not running because the kernel had not given it the CPU yet. Across every
+preset tested this was `0.0%`. The audio thread is never preempted by a lower-
+priority process.
+
+#### CPU governor
+
+The kiosk unit pins all CPUs to `performance` via `ExecStartPre` (runs as root,
+no sudoers entry needed) and restores `ondemand` on `ExecStopPost`. On the Pi 4
+`performance` locks all four cores to 1500 MHz:
+
+```sh
+# verified via cpufreq sysfs
+cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor   # performance
+cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq   # 1500000
+```
+
+#### Scheduler jitter (cyclictest)
+
+With SCHED_FIFO active, 20 000 wakeup samples over 10 s at a 500 µs probe
+interval:
+
+```
+T: 0  P:95  I:500  C:20000  Min:3  Avg:5  Max:120  (all µs)
+```
+
+One 256-frame buffer period is **5 800 µs**. Worst-case jitter of 120 µs is
+**2 % of one period** — negligible on a stock PREEMPT kernel with no RT patch.
+
+#### DSP load per preset
+
+Measured via `/proc/<tid>/schedstat` (nanosecond resolution) over a 5-second
+window: PortAudio backend, `bcm2835 hw:0,0`, 256 frames at 44 100 Hz,
+SCHED\_FIFO/95, `performance` governor, one voice (`--test-note 60`).
+
+| Preset | CPU (1 core) | µs/callback | % of 5.80 ms budget |
+| --- | :---: | :---: | :---: |
+| Baseline — no note | 10.2 % | 750 | 12.9 % |
+| BB Cool Beans Epic Mega Pad | 14.8 % | 1 112 | 19.2 % |
+| BB 80s Cop Drama | 14.1 % | 1 035 | 17.8 % |
+| Buchla Bells of Brooklyn | 17.4 % | 1 283 | 22.1 % |
+| Synth Dream Piano | 17.6 % | 1 295 | 22.3 % |
+| ARP — Kiss Me, You Spy! | 19.5 % | 1 430 | 24.7 % |
+| Agent R Deckard (1 finger) | 21.4 % | 1 551 | 26.7 % |
+| Journey Thru Cosmos | 24.3 % | 2 426 | 41.8 % |
+| Synthwave 1974 | **26.2 %** | **2 605** | **44.9 %** |
+
+The 750 µs baseline includes the PortAudio→ALSA→bcm2835 firmware round-trip.
+The per-voice DSP cost is the difference above that floor. All presets leave
+comfortable headroom at one voice; the two heaviest (Journey Thru Cosmos,
+Synthwave 1974) approach the budget at full six-voice polyphony — use
+`--buffer 512` (11.6 ms) if you sustain full chords on those patches.
+
+`tools/bench-latency.sh` automates this measurement: start the synth, then
+run the script and it reports scheduling class, governor state and optionally a
+cyclictest histogram.
+
+#### Upgrading to an I2S DAC HAT
+
+The built-in 3.5 mm audio is a PWM peripheral driven through VideoCore GPU
+firmware. That firmware adds a hidden double-buffer beneath ALSA, which is
+why the output latency at 256 frames is **11.6 ms** rather than the
+5.8 ms the buffer math predicts — and why shrinking the buffer further does
+not help: the firmware floor is fixed.
+
+An I2S DAC HAT (PCM5122-based: HiFiBerry DAC+, JustBoom DAC, Pimoroni pHAT
+DAC) bypasses the firmware entirely. Audio goes CPU → DMA → DAC, so:
+
+| | bcm2835 (built-in) | I2S DAC HAT |
+| --- | :---: | :---: |
+| Output latency @ 256 frames | 11.6 ms | ≈ 5.8 ms |
+| Output latency @ 128 frames | 11.6 ms (firmware floor) | ≈ 3.0 ms |
+| Output latency @ 64 frames | 11.6 ms (cannot go lower) | ≈ 1.5 ms |
+| Clock jitter | High (PWM clock) | Low (PLL / crystal on DAC) |
+| CPU for transfer | Firmware overhead | ≈ 0 (DMA) |
+| Baseline CPU reduction | — | ~1–3 % |
+
+The I2S pins (GPIO 18–21) do not conflict with the Waveshare DSI display
+(ribbon connector) or its I2C backlight line (GPIO 2–3). Enable with one
+`dtoverlay` line in `/boot/firmware/config.txt` — `hifiberry-dacplus`,
+`justboom-dac`, or `hifiberry-dac` depending on the board — and `--device`
+to the new ALSA card.
+
+The RT scheduling and governor changes remove scheduler jitter as a latency
+source. I2S removes the firmware floor, allowing genuinely sub-5 ms
+note-to-sound latency on the Pi.
 
 ### Screenshots
 
@@ -374,6 +539,22 @@ six panels. The stills are gitignored; the two GIFs are the tracked artefacts.
 The official Raspberry Pi 7" display is **800x480**, under a third of the
 pixels the roomy layout assumes. Below 1000x620 the GUI switches itself to a
 compact mode; `--compact` and `--no-compact` force the decision either way.
+
+Compact is one decision, but the panels it serves are not one size: 1024x600
+is also compact and has 60% more pixels than 800x480. Drawn identically that
+surplus becomes empty space under the last shelf, because the extra width only
+packs the same blocks into fewer rows -- so compact sizes scale with the panel.
+The scale is `min(width/800, height/480)`, capped at 1.5, taken from the
+tighter axis so nothing overflows the other one, and it multiplies knob faces
+and panel tabs alike. 800x480 sits at 1.0 and is drawn exactly as before;
+1024x600 lands at 1.25, taking MAIN's knobs from 72px to 90px and the panel
+tabs from 74px to 92px, both taller with it.
+
+Knobs are deliberately **not** capped at the size the panel asks for. That
+figure is the desktop size, chosen for a mouse; capping there left a 1024x600
+display with 200px of dead space below the last shelf. A finger is a coarser
+instrument than a pointer, so a touch panel with room to spare is right to draw
+larger than the desktop does.
 
 What changes, and why:
 
@@ -544,6 +725,48 @@ document, the kind of thing that should follow the user between machines.) A use
 shadows a factory bank of the same name, and saving into a factory bank name
 copies that whole bank into your directory first, leaving the shipped file
 untouched -- so the source tree stays clean.
+
+### Choosing an output device
+
+The **AUDIO** button in the header opens a dialog listing every output the
+current backend can open, grouped by driver family, alongside sample rate and
+buffer size. It shows what the running stream actually settled on -- device,
+rate, buffer and the latency the driver granted -- which is usually the fastest
+way to find out that audio is going somewhere you are not listening to.
+
+Applying reopens the stream between frames, never inside one, since the render
+callback lives on the thread being torn down. Held notes are cut. Changing the
+sample rate additionally rebuilds the DSP kernel, because the wavetable
+increments, envelope rates and LFO phases are all derived from it; the preset
+and tuning are put back afterwards. Every failure path ends with the synth
+audible on the device it had before -- a mistyped device is a smaller problem
+than a synth that has gone quiet.
+
+The choice is remembered in the data directory that *holds* the preset
+directory, never inside it:
+
+```
+Linux    $XDG_DATA_HOME/synthone/audio.json   (default: ~/.local/share/synthone/audio.json)
+Windows  %APPDATA%\SynthOne\audio.json
+```
+
+Two reasons it sits outside. Banks are saved as `<bank>.json` in the preset
+directory, so a bank innocently named "audio" would collide with this file and
+one would silently overwrite the other. And `--user-dir` moves where *presets*
+live, which is a different question from which speaker this machine uses -- so
+this path deliberately ignores that flag. Which speaker you use belongs to the
+machine and must not travel with a preset collection onto another box.
+
+Both the index and the device name are stored, and the name has to still match
+at that index or the setting falls back to automatic -- device indices shift as
+hardware and sound servers come and go, and opening whatever now sits at index 3
+is worse than not trying.
+
+The same selection is available headlessly through `--list-devices` and
+`--device` on both hosts (`synthone-offline` writes a file and opens no device
+at all); the GUI additionally accepts `--rate` and `--buffer`. Flags override
+the saved file for that run without overwriting it, so a one-off `--device`
+does not become permanent.
 
 ## How the port works
 

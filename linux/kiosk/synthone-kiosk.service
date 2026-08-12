@@ -42,16 +42,25 @@ PAMName=login
 
 ExecStart=@BIN_DIR@/synthone-kiosk
 
+# CPU governor: switch to 'performance' before the audio thread starts,
+# restore 'ondemand' (the Pi default) after the service stops. These run
+# in the system context (root), so no sudoers entry is needed.
+# The inner sh -c handles the glob; ExecStart* do not expand globs.
+ExecStartPre=/bin/sh  -c 'for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do printf performance > "$f" 2>/dev/null || true; done'
+ExecStopPost=/bin/sh -c 'for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do printf ondemand  > "$f" 2>/dev/null || true; done'
+
 # A synth that dies should come straight back rather than leave a black panel.
 Restart=always
 RestartSec=2
 
-# Audio wants to keep up with the buffer even when the CPU is busy. This is a
-# request, not a guarantee: it only takes effect if the user has the headroom
-# (see /etc/security/limits.d and the audio group).
+# Audio wants to keep up with the buffer even when the CPU is busy.
+# LimitRTPRIO and LimitMEMLOCK let the process call pthread_setschedparam(SCHED_FIFO)
+# without root. 95 matches the rtprio ceiling in synthone-audio.conf.
 Nice=-10
 IOSchedulingClass=realtime
 IOSchedulingPriority=2
+LimitRTPRIO=95
+LimitMEMLOCK=infinity
 
 # Let the engine finish its buffer rather than being killed mid-note.
 TimeoutStopSec=10

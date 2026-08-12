@@ -14,9 +14,15 @@
 #endif
 
 #include <algorithm>
+#include <atomic>
 #include <cstdio>
 #include <cstring>
 #include <vector>
+
+#ifndef _WIN32
+#  include <pthread.h>
+#  include <sched.h>
+#endif
 
 namespace s1 {
 namespace {
@@ -79,9 +85,22 @@ PaDeviceIndex deviceForHostApi(PaHostApiTypeId type) {
 ///
 /// On Linux the default (ALSA, or PipeWire's ALSA emulation) is already the
 /// right answer and the list is just that one entry.
-std::vector<PaDeviceIndex> candidateOutputDevices(const std::string &hostApi,
+std::vector<PaDeviceIndex> candidateOutputDevices(const std::string &hostApi, int deviceIndex,
                                                   std::string &error) {
     std::vector<PaDeviceIndex> devices;
+
+    // An explicit device answers the question outright. It is deliberately not
+    // followed by fallbacks: someone who picked a device wants to be told it
+    // failed, not to be moved silently to another one.
+    if (deviceIndex != kAutoDevice) {
+        const PaDeviceInfo *info = Pa_GetDeviceInfo(static_cast<PaDeviceIndex>(deviceIndex));
+        if (info == nullptr || info->maxOutputChannels < 2) {
+            error = "device " + std::to_string(deviceIndex) +
+                    " is not a stereo output on this machine";
+            return {};
+        }
+        return {static_cast<PaDeviceIndex>(deviceIndex)};
+    }
 
     if (!hostApi.empty()) {
         for (const auto &entry : kHostApis) {
@@ -113,12 +132,52 @@ std::vector<PaDeviceIndex> candidateOutputDevices(const std::string &hostApi,
     return devices;
 }
 
+/// Holds PortAudio's global init for as long as it is in scope. Pa_Initialize
+/// is reference counted, so enumerating devices while a stream is open is safe
+/// and leaves that stream alone.
+struct PortAudioSession {
+    bool ok = false;
+    PortAudioSession() { ok = Pa_Initialize() == paNoError; }
+    ~PortAudioSession() { if (ok) Pa_Terminate(); }
+    PortAudioSession(const PortAudioSession &) = delete;
+    PortAudioSession &operator=(const PortAudioSession &) = delete;
+};
+
 } // namespace
+
+std::vector<OutputDevice> portAudioOutputDevices() {
+    PortAudioSession session;
+    if (!session.ok) return {};
+
+    const PaDeviceIndex fallback = Pa_GetDefaultOutputDevice();
+    const PaDeviceIndex count = Pa_GetDeviceCount();
+
+    std::vector<OutputDevice> devices;
+    for (PaDeviceIndex i = 0; i < count; ++i) {
+        const PaDeviceInfo *info = Pa_GetDeviceInfo(i);
+        // Stereo out or nothing: the synth renders two channels and has no
+        // mixdown, so a mono or capture-only device would only fail later.
+        if (info == nullptr || info->maxOutputChannels < 2) continue;
+
+        OutputDevice device;
+        device.index = static_cast<int>(i);
+        device.name = info->name != nullptr ? info->name : "output";
+        device.defaultSampleRate = info->defaultSampleRate;
+        device.maxChannels = info->maxOutputChannels;
+        device.isDefault = (i == fallback);
+        if (const PaHostApiInfo *api = Pa_GetHostApiInfo(info->hostApi)) {
+            device.hostApi = api->name != nullptr ? api->name : "";
+        }
+        devices.push_back(std::move(device));
+    }
+    return devices;
+}
 
 class PortAudioBackend : public AudioBackend {
 public:
-    PortAudioBackend(std::string hostApi, bool wasapiExclusive)
-        : mHostApi(std::move(hostApi)), mWasapiExclusive(wasapiExclusive) {}
+    PortAudioBackend(std::string hostApi, int deviceIndex, bool wasapiExclusive)
+        : mHostApi(std::move(hostApi)), mDeviceIndex(deviceIndex),
+          mWasapiExclusive(wasapiExclusive) {}
 
     ~PortAudioBackend() override {
         stop();
@@ -141,7 +200,8 @@ public:
         }
         mInitialised = true;
 
-        const std::vector<PaDeviceIndex> candidates = candidateOutputDevices(mHostApi, error);
+        const std::vector<PaDeviceIndex> candidates =
+            candidateOutputDevices(mHostApi, mDeviceIndex, error);
         if (candidates.empty()) {
             if (error.empty()) error = "PortAudio found no default output device";
             return false;
@@ -258,6 +318,23 @@ private:
     }
 
     int callback(void *output, uint32_t frames) {
+        // Escalate to real-time scheduling on the first call, which is the
+        // first time we are certain we are on the audio callback thread.
+        // SCHED_FIFO 95 matches the limit in /etc/security/limits.d/synthone-audio.conf
+        // and the LimitRTPRIO= in the kiosk unit. Fails silently when the
+        // system has not been configured for it (non-kiosk installs).
+#ifndef _WIN32
+        if (!mRtSet.exchange(true, std::memory_order_relaxed)) {
+            struct sched_param sp{};
+            sp.sched_priority = 95;
+            const int rc = pthread_setschedparam(pthread_self(), SCHED_FIFO, &sp);
+            if (rc != 0) {
+                std::fprintf(stderr, "[audio] SCHED_FIFO: %s (run install.sh --kiosk or add audio limits)\n",
+                             strerror(rc));
+            }
+        }
+#endif
+
         auto **channels = static_cast<float **>(output);
         float *left = channels[0];
         float *right = channels[1];
@@ -279,13 +356,17 @@ private:
     bool           mActive = false;
     std::string    mDeviceName;
     std::string    mHostApi;
+    int            mDeviceIndex = kAutoDevice;
     bool           mWasapiExclusive = false;
     double         mOutputLatencySec = 0.0;
+#ifndef _WIN32
+    std::atomic<bool> mRtSet{false};
+#endif
 };
 
-std::unique_ptr<AudioBackend> makePortAudioBackend(const std::string &hostApi,
+std::unique_ptr<AudioBackend> makePortAudioBackend(const std::string &hostApi, int deviceIndex,
                                                    bool wasapiExclusive) {
-    return std::make_unique<PortAudioBackend>(hostApi, wasapiExclusive);
+    return std::make_unique<PortAudioBackend>(hostApi, deviceIndex, wasapiExclusive);
 }
 
 } // namespace s1
