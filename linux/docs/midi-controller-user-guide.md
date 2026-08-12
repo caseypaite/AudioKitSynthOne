@@ -603,3 +603,7 @@ useful to know -- see the developer guide's testing section.
 - [Developer guide](midi-controller-developer-guide.md) -- architecture, how
   to add a driver for a new controller, and the MPK Mini mk3 protocol
   reference.
+- [Controller manuals](manuals/README.md) -- an illustrated, per-device
+  manual for each of the 20 controllers above, with a product photo, the
+  full mapping table, and where each mapped control shows up in
+  `synthone-gui`'s panels.

@@ -159,7 +159,9 @@ Learn -- your own learned CC always wins over a driver's default, and
 clearing all MIDI Learn leaves a driver's defaults in place, since they
 aren't something you set. Full detail: the
 [user guide](docs/midi-controller-user-guide.md) covers usage and
-troubleshooting; the
+troubleshooting (with an
+[illustrated, per-device manual](docs/manuals/README.md) for each of the 20
+supported controllers); the
 [developer guide](docs/midi-controller-developer-guide.md) covers the SysEx
 transport, the driver interface, and how to add a driver for a new
 controller.
