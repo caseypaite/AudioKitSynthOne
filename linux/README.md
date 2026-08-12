@@ -1,5 +1,9 @@
 # AudioKit Synth One — Linux and Windows port
 
+**Port version: 0.0.1 (alpha)** — versioned separately from the iOS app's own
+`MARKETING_VERSION`; run `synthone --version` / `synthone-gui --version` to
+confirm what a given build reports.
+
 A native build of the Synth One **synthesis engine** for Linux (x86_64 and
 aarch64) and Windows (x86_64), plus a standalone host and a graphical front end.
 
