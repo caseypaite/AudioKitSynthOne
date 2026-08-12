@@ -13,6 +13,8 @@
 
 #pragma once
 
+#include "MidiSysEx.h"
+
 #include <atomic>
 #include <cstdint>
 #include <string>
@@ -83,7 +85,14 @@ public:
     /// the port available for manual connection.
     bool connect(const std::string &spec, std::string &error);
 
-    void start(MidiQueue *queue);
+    /// Sources actually subscribed to by the most recent connect() call (more
+    /// than one when spec=="all"). Empty if connect() was never called,
+    /// failed entirely, or was given an empty spec.
+    std::vector<MidiSource> connectedSources() const { return mConnected; }
+
+    /// `sysexQueue` is optional -- pass nullptr to drop SysEx on the floor
+    /// (the pre-existing behaviour) rather than assembling it.
+    void start(MidiQueue *queue, SysExQueue *sysexQueue = nullptr);
     void stop();
 
     /// Enumerate readable MIDI sources on the system.
@@ -95,16 +104,32 @@ public:
     /// Called from the WinMM callback thread with a packed short message.
     /// Public only because that callback is a free function.
     void enqueuePacked(uint32_t packed);
+
+    /// Called from the WinMM callback thread with a MIM_LONGDATA (SysEx)
+    /// buffer. Public for the same reason as enqueuePacked. `hdr` is the
+    /// MIDIHDR* WinMM handed back; `handle` is the HMIDIIN it arrived on,
+    /// used to tag SysExMessage::sourceId and to re-post the buffer.
+    void enqueueSysExFragment(void *hdr, void *handle);
 #endif
 
 private:
-    std::string       mPortName;
-    MidiQueue        *mQueue = nullptr;
-    std::atomic<bool> mRunning{false};
+    std::string             mPortName;
+    MidiQueue               *mQueue = nullptr;
+    SysExQueue               *mSysExQueue = nullptr;
+    SysExAssembler            mSysExAssembler;
+    std::vector<MidiSource>  mConnected;
+    std::atomic<bool>        mRunning{false};
 
 #ifdef _WIN32
     // HMIDIIN, kept as void* so this header stays free of <windows.h>.
     std::vector<void *> mHandles;
+    // MIDIHDR* posted for SysEx reception, one entry per buffer; mSysExHeaderOwners
+    // holds the HMIDIIN each one was prepared/must be unprepared against
+    // (same index). One SysEx assembler per handle would be needed if
+    // sourceId must stay accurate across interleaved devices; in practice
+    // WinMM serializes callbacks, so a single mSysExAssembler is sufficient.
+    std::vector<void *> mSysExHeaders;
+    std::vector<void *> mSysExHeaderOwners;
 #else
     void run();
 

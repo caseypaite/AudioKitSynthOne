@@ -27,6 +27,7 @@
 #include "Json.h"
 #include "Panels.h"
 #include "Widgets.h"
+#include "ctrldev/ControllerDriverManager.h"
 
 #include <algorithm>
 
@@ -287,6 +288,9 @@ int main(int argc, char **argv) {
     int  layoutOverride = -1;   // -1 = read it off the display, 0 = desktop, 1 = Pi
     std::string topPanelName, bottomPanelName;
     bool wasapiExclusive = false;
+    std::string controllerDriverSpec = "auto";
+    bool listControllerDrivers = false;
+    bool controllerDriverConfigure = false;
 
     auto panelByName = [](const std::string &name, s1gui::Panel &out) {
         for (int i = 0; i < static_cast<int>(s1gui::Panel::Count); ++i) {
@@ -308,6 +312,9 @@ int main(int argc, char **argv) {
         else if (arg == "--rate") requestedRate = std::atoi(next().c_str());
         else if (arg == "--buffer") requestedFrames = std::atoi(next().c_str());
         else if (arg == "--list-devices") listDevices = true;
+        else if (arg == "--controller-driver") controllerDriverSpec = next();
+        else if (arg == "--controller-driver-configure") controllerDriverConfigure = true;
+        else if (arg == "--list-controller-drivers") listControllerDrivers = true;
         else if (arg == "--resources") resourceDir = next();
         else if (arg == "--user-dir") userDir = next();
         else if (arg == "--midi") midiSpec = next();
@@ -333,6 +340,8 @@ int main(int argc, char **argv) {
                         "                    [--device INDEX|NAME] [--list-devices]\n"
                         "                    [--rate HZ] [--buffer FRAMES]\n"
                         "                    [--midi CLIENT:PORT|all] [--midi-out CLIENT:PORT|all]\n"
+                        "                    [--controller-driver auto|off|NAME]\n"
+                        "                    [--controller-driver-configure] [--list-controller-drivers]\n"
                         "                    [--geometry WxH]\n"
                         "                    [--top PANEL] [--bottom PANEL]\n"
                         "                    [--fullscreen] [--hide-cursor]\n"
@@ -353,6 +362,13 @@ int main(int argc, char **argv) {
         return 1;
     }
     if (backendName.empty()) backendName = backends.front();
+
+    if (listControllerDrivers) {
+        for (const auto &name : s1::ctrldev::ControllerDriverManager::availableDriverNames()) {
+            std::printf("%s\n", name.c_str());
+        }
+        return 0;
+    }
 
     if (listDevices) {
         for (const auto &device : s1::availableOutputDevices(backendName)) {
@@ -430,12 +446,13 @@ int main(int argc, char **argv) {
     engine.setObserver(&observer);
 
     s1::MidiQueue midiQueue;
+    s1::SysExQueue sysexQueue;
     s1::MidiInput midi;
     std::string midiStatus = "unavailable";
     if (midi.open("SynthOne", error)) {
         std::string ignored;
         midi.connect(midiSpec, ignored);
-        midi.start(&midiQueue);
+        midi.start(&midiQueue, &sysexQueue);
         midiStatus = midi.portName();
     }
 
@@ -443,6 +460,15 @@ int main(int argc, char **argv) {
     if (!midiOutSpec.empty() && midiOut.open("SynthOne", error)) {
         std::string ignored;
         if (midiOut.connect(midiOutSpec, ignored)) observer.midiOut = &midiOut;
+    }
+
+    s1::ctrldev::ControllerDriverManager driverManager;
+    if (controllerDriverSpec != "off") {
+        std::string driverStatus;
+        if (driverManager.load(controllerDriverSpec, engine, midi.connectedSources(),
+                               controllerDriverConfigure, driverStatus)) {
+            std::printf("controller driver: %s\n", driverStatus.c_str());
+        }
     }
 
     auto render = [&engine, &midiQueue](float *left, float *right, uint32_t frames) {
@@ -653,6 +679,9 @@ int main(int argc, char **argv) {
         }
 
         engine.drainNotifications();
+
+        s1::SysExMessage sysexMsg;
+        while (sysexQueue.pop(sysexMsg)) driverManager.dispatchSysEx(sysexMsg);
 
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();

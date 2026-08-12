@@ -82,6 +82,7 @@ bool MidiOutput::connect(const std::string &spec, std::string &error) {
             error = "no connectable MIDI destinations found";
             return false;
         }
+        mConnected = true;
         return true;
     }
 
@@ -91,7 +92,11 @@ bool MidiOutput::connect(const std::string &spec, std::string &error) {
         return false;
     }
     try {
-        return subscribe(std::stoi(spec.substr(0, colon)), std::stoi(spec.substr(colon + 1)));
+        if (!subscribe(std::stoi(spec.substr(0, colon)), std::stoi(spec.substr(colon + 1)))) {
+            return false;
+        }
+        mConnected = true;
+        return true;
     } catch (...) {
         error = "malformed MIDI port '" + spec + "'";
         return false;
@@ -169,6 +174,23 @@ void MidiOutput::noteOn(int channel, int note, int velocity) {
 
 void MidiOutput::noteOff(int channel, int note, int velocity) {
     sendNoteEvent(mSeq, mPort, SND_SEQ_EVENT_NOTEOFF, channel, note, velocity);
+}
+
+void MidiOutput::sendSysEx(const uint8_t *data, size_t length) {
+    if (mSeq == nullptr || data == nullptr || length == 0) return;
+    snd_seq_t *seq = static_cast<snd_seq_t *>(mSeq);
+
+    snd_seq_event_t ev;
+    snd_seq_ev_clear(&ev);
+    snd_seq_ev_set_source(&ev, static_cast<unsigned char>(mPort));
+    snd_seq_ev_set_subs(&ev);
+    snd_seq_ev_set_direct(&ev);
+    // set_sysex takes a non-const pointer, but the ALSA sequencer copies the
+    // variable-length payload into the event it builds rather than retaining
+    // this pointer -- the same guarantee _direct already relies on for note
+    // events -- so `data` need not outlive this call.
+    snd_seq_ev_set_sysex(&ev, length, const_cast<uint8_t *>(data));
+    snd_seq_event_output_direct(seq, &ev);
 }
 
 } // namespace s1

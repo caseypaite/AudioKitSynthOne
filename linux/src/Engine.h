@@ -96,6 +96,19 @@ public:
     /// Taper used when a CC drives a parameter, so learned knobs track the UI.
     void  setMidiLearnTaper(S1Parameter parameter, float taper);
 
+    // -- controller driver defaults -----------------------------------------
+    //
+    // A separate table from the MIDI-learn one above: a connected controller
+    // driver's factory-default CC mapping (see host/ctrldev/), consulted by
+    // handleMidi() only for a CC the user hasn't already bound with MIDI
+    // Learn -- the user's own learn always wins, and clearAllMidiLearn()
+    // leaves this table alone, since it isn't something the user set.
+
+    /// The device-driver default for `cc`, or S1ParameterCount if none.
+    S1Parameter deviceDefaultForCc(int cc) const;
+    void setDeviceDefaultCc(int cc, S1Parameter parameter);
+    void clearDeviceDefaults();
+
     // -- tuning ------------------------------------------------------------
 
     /// The DSP holds a 128-entry midi-note -> frequency table.
@@ -218,6 +231,10 @@ private:
     std::atomic<int>   mLearnTarget{-1};
     std::atomic<int>   mCcToParameter[128];
     float              mLearnTaper[S1Parameter::S1ParameterCount];
+
+    // Controller-driver defaults; see the "-- controller driver defaults --"
+    // section above.
+    std::atomic<int>   mDeviceDefaultCc[128];
 };
 
 } // namespace s1

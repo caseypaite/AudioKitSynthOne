@@ -115,6 +115,7 @@ bool MidiOutput::connect(const std::string &spec, std::string &error) {
 
     mPortName = opened.size() == 1 ? opened.front()
                                    : std::to_string(mHandles.size()) + " devices";
+    mConnected = true;
     return true;
 }
 
@@ -152,6 +153,39 @@ void MidiOutput::noteOn(int channel, int note, int velocity) {
 
 void MidiOutput::noteOff(int channel, int note, int velocity) {
     sendShortMsg(mHandles, 0x80 | (channel & 0x0F), note, velocity);
+}
+
+void MidiOutput::sendSysEx(const uint8_t *data, size_t length) {
+    if (data == nullptr || length == 0) return;
+
+    for (void *rawHandle : mHandles) {
+        auto handle = static_cast<HMIDIOUT>(rawHandle);
+
+        MIDIHDR hdr{};
+        // Stable storage for the duration of the prepare/send/unprepare
+        // cycle below -- WinMM keeps a pointer into this, so it must outlive
+        // midiOutLongMsg, not just this function's call to it.
+        std::vector<uint8_t> buffer(data, data + length);
+        hdr.lpData = reinterpret_cast<LPSTR>(buffer.data());
+        hdr.dwBufferLength = hdr.dwBytesRecorded = static_cast<DWORD>(length);
+
+        if (midiOutPrepareHeader(handle, &hdr, sizeof(hdr)) != MMSYSERR_NOERROR) continue;
+        if (midiOutLongMsg(handle, &hdr, sizeof(hdr)) != MMSYSERR_NOERROR) {
+            midiOutUnprepareHeader(handle, &hdr, sizeof(hdr));
+            continue;
+        }
+
+        // This output was opened with CALLBACK_NULL, so there is no MOM_DONE
+        // notification to wait on -- polling midiOutUnprepareHeader until it
+        // stops returning MIDIERR_STILLPLAYING is the standard callback-free
+        // idiom for a synchronous sysex send. Bounded so a wedged device
+        // can't hang the control thread (this must never be called from the
+        // render callback).
+        for (int waitedMs = 0; waitedMs < 2000; waitedMs += 5) {
+            if (midiOutUnprepareHeader(handle, &hdr, sizeof(hdr)) != MIDIERR_STILLPLAYING) break;
+            Sleep(5);
+        }
+    }
 }
 
 } // namespace s1

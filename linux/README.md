@@ -143,6 +143,63 @@ sequencer, not the raw keyboard MIDI in sees -- driven off the same
 notification the GUI uses to highlight the on-screen keyboard, so it costs
 nothing extra on the render thread.
 
+### Controller drivers
+
+Some MIDI controllers get a small built-in driver, in the spirit of
+Zynthian's `zyngine/ctrldev` drivers but scoped to what Synth One actually
+has -- no chains, mixer strips, or pad-launcher grid, just synth parameters
+and ordinary note input. A driver matches a connected device by name,
+optionally exchanges SysEx with it at startup, and seeds default knob-to-
+parameter mappings underneath whatever you've bound yourself with MIDI
+Learn -- your own learned CC always wins over a driver's default, and
+clearing all MIDI Learn leaves a driver's defaults in place, since they
+aren't something you set. Full detail: the
+[user guide](docs/midi-controller-user-guide.md) covers usage and
+troubleshooting; the
+[developer guide](docs/midi-controller-developer-guide.md) covers the SysEx
+transport, the driver interface, and how to add a driver for a new
+controller.
+
+```sh
+./build/synthone --list-controller-drivers
+./build/synthone --controller-driver auto            # default: match whatever's connected
+./build/synthone --controller-driver off              # disable
+./build/synthone --controller-driver akai-mpk-mini-mk3   # force-load
+```
+
+Currently supported: **Akai MPK Mini mk3**. At startup the driver queries the
+device over SysEx for its current knob CC assignments and maps the 8 knobs to
+cutoff, resonance, attack, release, LFO 1 rate, reverb mix, delay mix and
+master volume; if the query doesn't complete (no matching output port found,
+or the device doesn't reply), the knobs are simply unbound until you MIDI
+Learn them yourself -- there's no hardcoded factory-CC guess, since assuming
+wrong risks reassigning a universally-reserved CC like the mod wheel. The 16
+pads and the keybed need no special handling at all: they play notes exactly
+like any other MIDI keyboard, on whatever channel the device sends them on.
+
+`--controller-driver-configure` (off by default) permits a driver to *write*
+configuration to its device, not just read from it -- the MPK driver
+implements this (`CMD_WRITE_DATA`, the same SysEx command Zynthian's own
+reference driver uses to program the device) but does not invoke it
+automatically even when the flag is set; it's reserved for a future pass. The
+whole SysEx byte layout for the MPK Mini mk3 -- envelope, command bytes, and
+the pad/knob table offsets -- is transcribed from Zynthian's shipped driver
+(`zyngine/ctrldev/zynthian_ctrldev_akai_mpk_mini_mk3.py`, itself sourced from
+[tsmetana/mpk3-settings](https://github.com/tsmetana/mpk3-settings)), a
+working reference implementation rather than a guess, but it has not been
+validated against physical hardware in this project's development
+environment -- see the comments in `host/ctrldev/AkaiMpkMiniMk3.cpp` for
+which fields are protocol-confirmed versus a judgment call (the 8 target
+parameters, the Windows device-name hint). The WinMM SysEx transport
+(`host/WinMidi.cpp`/`WinMidiOut.cpp`) is likewise implemented from documented
+WinMM behaviour but untested on real Windows, since this port is
+cross-compiled from Linux -- test both before relying on this in practice on
+Windows or with real MPK hardware.
+
+There's no hotplug detection: a driver is matched once at startup against
+whatever `--midi` already connected, the same limitation regular MIDI ports
+have in this port.
+
 The same commands work on Windows, with two differences: there is no JACK, so
 `--backend portaudio` is the only choice and `--host-api` picks the driver
 family beneath it, and `--midi` takes a device index rather than `CLIENT:PORT`.
@@ -893,8 +950,9 @@ linux/
   src/                  Soundpipe additions, Obj-C file replacements,
                         JSON reader, engine facade, Win32 path lookup
   host/                 JACK + PortAudio backends, ALSA and WinMM MIDI, CLI
+  host/ctrldev/         per-device MIDI controller drivers (SysEx, CC defaults)
   gui/                  Dear ImGui front end
   kiosk/                systemd unit, launcher and config for the Pi kiosk
   tools/                synthone-offline, tunings extractor, screenshot capture,
-                        round-trip latency measurement
+                        round-trip latency measurement, sysex_assembler_test
 ```

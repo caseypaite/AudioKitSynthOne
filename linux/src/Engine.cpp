@@ -163,6 +163,7 @@ const Mapping kMappings[] = {
 
 Engine::Engine() {
     for (int i = 0; i < 128; ++i) mCcToParameter[i].store(-1, std::memory_order_relaxed);
+    for (int i = 0; i < 128; ++i) mDeviceDefaultCc[i].store(-1, std::memory_order_relaxed);
     for (int i = 0; i < S1Parameter::S1ParameterCount; ++i) mLearnTaper[i] = 1.0f;
 }
 
@@ -364,6 +365,17 @@ void Engine::handleMidi(const uint8_t *data, int length) {
                         parameter, positionToValue(parameter, position, mLearnTaper[mapped]));
                     return;
                 }
+
+                // No user MIDI-learn binding for this CC -- fall back to a
+                // connected controller driver's factory default, if any.
+                const int deviceDefault = mDeviceDefaultCc[cc].load(std::memory_order_acquire);
+                if (deviceDefault >= 0 && deviceDefault < S1Parameter::S1ParameterCount) {
+                    const S1Parameter parameter = static_cast<S1Parameter>(deviceDefault);
+                    const float position = static_cast<float>(value) / 127.0f;
+                    mKernel->setSynthParameter(
+                        parameter, positionToValue(parameter, position, mLearnTaper[deviceDefault]));
+                    return;
+                }
             }
         }
     }
@@ -498,6 +510,22 @@ void Engine::setMidiLearnTaper(S1Parameter parameter, float taper) {
     if (parameter < S1Parameter::S1ParameterCount) {
         mLearnTaper[static_cast<int>(parameter)] = taper > 0.f ? taper : 1.f;
     }
+}
+
+S1Parameter Engine::deviceDefaultForCc(int cc) const {
+    if (cc < 0 || cc >= 128) return S1Parameter::S1ParameterCount;
+    const int mapped = mDeviceDefaultCc[cc].load(std::memory_order_acquire);
+    return (mapped >= 0 && mapped < S1Parameter::S1ParameterCount)
+               ? static_cast<S1Parameter>(mapped) : S1Parameter::S1ParameterCount;
+}
+
+void Engine::setDeviceDefaultCc(int cc, S1Parameter parameter) {
+    if (cc < 0 || cc >= 128 || parameter >= S1Parameter::S1ParameterCount) return;
+    mDeviceDefaultCc[cc].store(static_cast<int>(parameter), std::memory_order_release);
+}
+
+void Engine::clearDeviceDefaults() {
+    for (int cc = 0; cc < 128; ++cc) mDeviceDefaultCc[cc].store(-1, std::memory_order_release);
 }
 
 // ---------------------------------------------------------------------------

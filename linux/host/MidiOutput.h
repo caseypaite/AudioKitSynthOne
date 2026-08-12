@@ -38,8 +38,20 @@ public:
     /// for manual connection (Linux only -- WinMM has no such notion).
     bool connect(const std::string &spec, std::string &error);
 
+    /// True once connect() has bound at least one destination. False after a
+    /// no-op connect() (empty spec) or before connect() is called at all --
+    /// useful for a caller (e.g. a controller driver) that needs to know
+    /// whether it actually has somewhere to send before trying.
+    bool isConnected() const { return mConnected; }
+
     void noteOn(int channel, int note, int velocity);
     void noteOff(int channel, int note, int velocity);
+
+    /// Send a complete SysEx message. `data` must start with 0xF0 and end
+    /// with 0xF7. Synchronous -- returns once the platform confirms the
+    /// bytes are sent (Windows) or handed to the kernel (Linux). Control-
+    /// thread only; never call from the render callback.
+    void sendSysEx(const uint8_t *data, size_t length);
 
     /// Enumerate destinations that accept MIDI input on the system.
     static std::vector<MidiSource> listDestinations();
@@ -48,6 +60,7 @@ public:
 
 private:
     std::string mPortName;
+    bool        mConnected = false;
 
 #ifdef _WIN32
     // HMIDIOUT, kept as void* so this header stays free of <windows.h>.

@@ -21,6 +21,7 @@
 #include "MidiOutput.h"
 #include "AudioBackend.h"
 #include "Engine.h"
+#include "ctrldev/ControllerDriverManager.h"
 
 #include <algorithm>
 
@@ -69,6 +70,12 @@ void handleSignal(int) { gRunning.store(false); }
         "  --list-midi        list MIDI sources, then exit\n"
         "  --list-midi-out    list MIDI destinations, then exit\n"
         "  --list-devices     list audio output devices, then exit\n"
+        "  --controller-driver auto|off|NAME  per-device MIDI controller driver\n"
+        "                     (default: auto)\n"
+        "  --controller-driver-configure  allow a driver to write configuration to\n"
+        "                     its device, not just read from it (default: off)\n"
+        "  --list-controller-drivers  list controller drivers compiled into this\n"
+        "                     binary, then exit\n"
         "  --quiet            do not print the running status line\n"
         "\n"
         "Notes are played over MIDI. Ctrl-C to quit.\n";
@@ -147,6 +154,9 @@ int main(int argc, char **argv) {
          quiet = false;
     bool listDevices = false;
     bool wasapiExclusive = false;
+    std::string controllerDriverSpec = "auto";
+    bool listControllerDrivers = false;
+    bool controllerDriverConfigure = false;
     int testNote = -1;
     std::vector<std::pair<std::string, float>> overrides;
 
@@ -174,6 +184,9 @@ int main(int argc, char **argv) {
         else if (arg == "--list-midi-out") listMidiOut = true;
         else if (arg == "--device") deviceSpec = next();
         else if (arg == "--list-devices") listDevices = true;
+        else if (arg == "--controller-driver") controllerDriverSpec = next();
+        else if (arg == "--controller-driver-configure") controllerDriverConfigure = true;
+        else if (arg == "--list-controller-drivers") listControllerDrivers = true;
         else if (arg == "--quiet") quiet = true;
         else if (arg == "--test-note") testNote = std::stoi(next());
         else if (arg == "--set") {
@@ -194,6 +207,13 @@ int main(int argc, char **argv) {
     if (listMidiOut) {
         for (const auto &dest : s1::MidiOutput::listDestinations()) {
             std::cout << dest.id << "  " << dest.name << "\n";
+        }
+        return 0;
+    }
+
+    if (listControllerDrivers) {
+        for (const auto &name : s1::ctrldev::ControllerDriverManager::availableDriverNames()) {
+            std::cout << name << "\n";
         }
         return 0;
     }
@@ -308,6 +328,7 @@ int main(int argc, char **argv) {
     // -- MIDI --------------------------------------------------------------
 
     s1::MidiQueue midiQueue;
+    s1::SysExQueue sysexQueue;
     s1::MidiInput midi;
     std::string midiStatus;
     if (!midi.open("SynthOne", error)) {
@@ -320,7 +341,14 @@ int main(int argc, char **argv) {
             midiStatus = midi.portName() +
                          (midiSpec == "all" ? " <- all sources" : " <- " + midiSpec);
         }
-        midi.start(&midiQueue);
+        midi.start(&midiQueue, &sysexQueue);
+    }
+
+    s1::ctrldev::ControllerDriverManager driverManager;
+    std::string driverStatus = "off";
+    if (controllerDriverSpec != "off") {
+        driverManager.load(controllerDriverSpec, engine, midi.connectedSources(),
+                           controllerDriverConfigure, driverStatus);
     }
 
     s1::MidiOutput midiOut;
@@ -377,6 +405,9 @@ int main(int argc, char **argv) {
     if (observer.midiOut != nullptr || !midiOutSpec.empty()) {
         std::cout << "  [midi-out] " << midiOutStatus << "\n";
     }
+    if (controllerDriverSpec != "off") {
+        std::cout << "  [ctrl]    " << driverStatus << "\n";
+    }
     if (!presetName.empty()) {
         std::cout << "  [preset]  " << presetPosition << ": " << presetName << " [" << bank << "]\n";
     }
@@ -411,6 +442,9 @@ int main(int argc, char **argv) {
         }
 
         engine.drainNotifications();
+
+        s1::SysExMessage sysexMsg;
+        while (sysexQueue.pop(sysexMsg)) driverManager.dispatchSysEx(sysexMsg);
 
         if (testNote >= 0) {
             // 1 s on, 0.5 s off, at the 50 ms tick below.

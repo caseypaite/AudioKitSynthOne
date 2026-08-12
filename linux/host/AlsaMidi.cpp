@@ -55,6 +55,7 @@ bool MidiInput::connect(const std::string &spec, std::string &error) {
     if (spec.empty() || mSeq == nullptr) return true;
 
     snd_seq_t *seq = static_cast<snd_seq_t *>(mSeq);
+    const std::vector<MidiSource> sources = listSources();
 
     auto subscribe = [&](int client, int port) -> bool {
         snd_seq_addr_t sender{static_cast<unsigned char>(client), static_cast<unsigned char>(port)};
@@ -70,12 +71,18 @@ bool MidiInput::connect(const std::string &spec, std::string &error) {
                     std::to_string(port) + ": " + snd_strerror(rc);
             return false;
         }
+        for (const auto &source : sources) {
+            if (source.client == client && source.port == port) {
+                mConnected.push_back(source);
+                break;
+            }
+        }
         return true;
     };
 
     if (spec == "all") {
         bool any = false;
-        for (const auto &source : listSources()) {
+        for (const auto &source : sources) {
             std::string ignored;
             if (subscribe(source.client, source.port)) any = true;
         }
@@ -136,9 +143,10 @@ std::vector<MidiSource> MidiInput::listSources() {
     return sources;
 }
 
-void MidiInput::start(MidiQueue *queue) {
+void MidiInput::start(MidiQueue *queue, SysExQueue *sysexQueue) {
     if (mSeq == nullptr || mRunning.load()) return;
     mQueue = queue;
+    mSysExQueue = sysexQueue;
     mRunning.store(true);
     mThread = std::thread(&MidiInput::run, this);
 }
@@ -192,6 +200,19 @@ void MidiInput::run() {
                                 (event->data.control.channel & 0x0F));
                     m.data[1] = static_cast<uint8_t>(value & 0x7F);
                     m.data[2] = static_cast<uint8_t>((value >> 7) & 0x7F);
+                    break;
+                }
+                case SND_SEQ_EVENT_SYSEX: {
+                    const auto *bytes = static_cast<const uint8_t *>(event->data.ext.ptr);
+                    const unsigned len = event->data.ext.len;
+                    SysExMessage sysex;
+                    // append() copies synchronously into the assembler's own
+                    // buffer before snd_seq_free_event() below invalidates
+                    // event->data.ext.ptr.
+                    if (bytes != nullptr && mSysExAssembler.append(bytes, len, sysex)) {
+                        sysex.sourceId = event->source.client;
+                        if (mSysExQueue != nullptr) mSysExQueue->push(sysex);
+                    }
                     break;
                 }
                 default:

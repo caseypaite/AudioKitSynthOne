@@ -256,6 +256,16 @@ add_executable(synthone-offline tools/synthone_offline.cpp)
 target_link_libraries(synthone-offline PRIVATE synthone_core)
 
 # ---------------------------------------------------------------------------
+# sysex_assembler_test: exercises MidiSysEx.h's SysExAssembler/SysExQueue
+# against synthetic byte sequences. Header-only and platform-independent, so
+# it needs neither ALSA/WinMM nor any of the audio backends -- builds
+# unconditionally, unlike the rest of host/.
+# ---------------------------------------------------------------------------
+
+add_executable(sysex_assembler_test tools/sysex_assembler_test.cpp)
+target_include_directories(sysex_assembler_test PRIVATE host)
+
+# ---------------------------------------------------------------------------
 # Platform dependencies
 #
 # Linux takes its audio, MIDI and windowing libraries from the system through
@@ -387,9 +397,11 @@ else()
     # Everything that both the CLI host and the GUI need in order to make sound.
     add_library(synthone_host STATIC
         host/AudioBackend.cpp
+        host/ctrldev/ControllerDriverManager.cpp
+        host/ctrldev/AkaiMpkMiniMk3.cpp
         ${S1_MIDI_SOURCE}
     )
-    target_include_directories(synthone_host PUBLIC host)
+    target_include_directories(synthone_host PUBLIC host host/ctrldev)
     target_link_libraries(synthone_host PUBLIC synthone_core ${S1_MIDI_LIBS} Threads::Threads)
     target_compile_options(synthone_host PRIVATE -Wall)
 
