@@ -18,8 +18,11 @@
 #include <vector>
 
 #include "MidiInput.h"
+#include "MidiOutput.h"
 #include "AudioBackend.h"
 #include "Engine.h"
+
+#include <algorithm>
 
 namespace {
 
@@ -36,6 +39,10 @@ void handleSignal(int) { gRunning.store(false); }
         "  --backend NAME     audio backend: jack | portaudio (default: first available)\n"
         "  --host-api NAME    PortAudio driver family (wasapi, directsound, mme, alsa...);\n"
         "                     default prefers WASAPI on Windows, the system default elsewhere\n"
+#ifdef _WIN32
+        "  --wasapi-exclusive bypass the shared-mode mixer for lower latency (WASAPI only;\n"
+        "                     falls back to shared mode if the device refuses it)\n"
+#endif
         "  --rate HZ          preferred sample rate (PortAudio only; JACK dictates its own)\n"
         "  --buffer FRAMES    preferred buffer size (PortAudio only)\n"
         "  --latency MS       output latency to aim for (PortAudio only;\n"
@@ -45,21 +52,31 @@ void handleSignal(int) { gRunning.store(false); }
         "  --preset N         preset position within the bank (default: 0)\n"
 #ifdef _WIN32
         "  --midi PORT        MIDI device index, or 'all' (default: all)\n"
+        "  --midi-out PORT    MIDI device index, or 'all' (default: none)\n"
 #else
         "  --midi PORT        ALSA source as CLIENT:PORT, or 'all' (default: all)\n"
+        "  --midi-out PORT    ALSA destination as CLIENT:PORT, or 'all' (default: none)\n"
 #endif
+        "                     sends the actually-sounding notes -- after the arp and\n"
+        "                     sequencer, not the raw keyboard -- to an external device\n"
+        "                     or another application\n"
         "  --set KEY=VALUE    override a synth parameter (repeatable)\n"
         "  --test-note N      play MIDI note N on a loop, to check audio without a controller\n"
         "  --list             list preset banks and presets, then exit\n"
         "  --list-params      list settable parameter names, then exit\n"
         "  --list-midi        list MIDI sources, then exit\n"
+        "  --list-midi-out    list MIDI destinations, then exit\n"
         "  --quiet            do not print the running status line\n"
         "\n"
         "Notes are played over MIDI. Ctrl-C to quit.\n";
     std::exit(2);
 }
 
-/// Prints DSP notifications; the iOS app drives its UI from these.
+/// Prints DSP notifications (the iOS app drives its UI from these) and, when
+/// `midiOut` is set, forwards the same notification to MIDI out. Both read
+/// off S1Protocol::playingNotesDidChange because that already carries the
+/// notes as they actually sound -- after the arp and sequencer -- rather than
+/// the raw keyboard input MidiInput sees.
 class StatusObserver : public S1Protocol {
 public:
     void heldNotesDidChange(HeldNotes notes) override {
@@ -74,11 +91,38 @@ public:
             if (notes.playingNotes[i].noteNumber >= 0) ++voices;
         }
         playing.store(voices, std::memory_order_relaxed);
+
+        if (midiOut != nullptr) forwardToMidiOut(notes);
     }
 
-    std::atomic<int> heldCount{0};
-    std::atomic<int> beat{0};
-    std::atomic<int> playing{0};
+    s1::MidiOutput   *midiOut = nullptr;
+    std::atomic<int>  heldCount{0};
+    std::atomic<int>  beat{0};
+    std::atomic<int>  playing{0};
+
+private:
+    // Diffs against the last-sent state per voice slot so a note that keeps
+    // sounding across two notifications (e.g. only another voice changed)
+    // does not retrigger, and a slot that empties gets its note-off.
+    void forwardToMidiOut(const PlayingNotes &notes) {
+        for (int i = 0; i < S1_MAX_POLYPHONY; ++i) {
+            const bool sounding = i < notes.polyphony && notes.playingNotes[i].noteNumber >= 0;
+            const int newNote = sounding
+                ? std::clamp(notes.playingNotes[i].noteNumber + notes.playingNotes[i].transpose,
+                             0, 127)
+                : -1;
+            if (mLastNote[i] == newNote) continue;
+
+            if (mLastNote[i] >= 0) midiOut->noteOff(0, mLastNote[i], 0);
+            if (newNote >= 0) {
+                const int velocity = std::clamp(notes.playingNotes[i].velocity, 1, 127);
+                midiOut->noteOn(0, newNote, velocity);
+            }
+            mLastNote[i] = newNote;
+        }
+    }
+
+    int mLastNote[S1_MAX_POLYPHONY] = {-1, -1, -1, -1, -1, -1};
 };
 
 } // namespace
@@ -90,11 +134,14 @@ int main(int argc, char **argv) {
     std::string userDir;
     std::string bank;
     std::string midiSpec = "all";
+    std::string midiOutSpec;
     int presetPosition = 0;
     double requestedRate = 0;
     uint32_t requestedFrames = 0;
     double requestedLatencySec = 0.0;
-    bool listPresets = false, listParams = false, listMidi = false, quiet = false;
+    bool listPresets = false, listParams = false, listMidi = false, listMidiOut = false,
+         quiet = false;
+    bool wasapiExclusive = false;
     int testNote = -1;
     std::vector<std::pair<std::string, float>> overrides;
 
@@ -106,6 +153,7 @@ int main(int argc, char **argv) {
         };
         if (arg == "--backend") backendName = next();
         else if (arg == "--host-api") hostApi = next();
+        else if (arg == "--wasapi-exclusive") wasapiExclusive = true;
         else if (arg == "--rate") requestedRate = std::stod(next());
         else if (arg == "--buffer") requestedFrames = static_cast<uint32_t>(std::stoul(next()));
         else if (arg == "--latency") requestedLatencySec = std::stod(next()) / 1000.0;
@@ -114,9 +162,11 @@ int main(int argc, char **argv) {
         else if (arg == "--bank") bank = next();
         else if (arg == "--preset") presetPosition = std::stoi(next());
         else if (arg == "--midi") midiSpec = next();
+        else if (arg == "--midi-out") midiOutSpec = next();
         else if (arg == "--list") listPresets = true;
         else if (arg == "--list-params") listParams = true;
         else if (arg == "--list-midi") listMidi = true;
+        else if (arg == "--list-midi-out") listMidiOut = true;
         else if (arg == "--quiet") quiet = true;
         else if (arg == "--test-note") testNote = std::stoi(next());
         else if (arg == "--set") {
@@ -131,6 +181,12 @@ int main(int argc, char **argv) {
     if (listMidi) {
         for (const auto &source : s1::MidiInput::listSources()) {
             std::cout << source.id << "  " << source.name << "\n";
+        }
+        return 0;
+    }
+    if (listMidiOut) {
+        for (const auto &dest : s1::MidiOutput::listDestinations()) {
+            std::cout << dest.id << "  " << dest.name << "\n";
         }
         return 0;
     }
@@ -155,7 +211,7 @@ int main(int argc, char **argv) {
         }
         if (backendName.empty()) backendName = backends.front();
 
-        backend = s1::makeBackend(backendName, hostApi, error);
+        backend = s1::makeBackend(backendName, hostApi, wasapiExclusive, error);
         if (!backend) {
             std::cerr << "error: " << error << "\n";
             return 1;
@@ -234,6 +290,24 @@ int main(int argc, char **argv) {
         midi.start(&midiQueue);
     }
 
+    s1::MidiOutput midiOut;
+    std::string midiOutStatus = "off";
+    if (!midiOutSpec.empty()) {
+        if (!midiOut.open("SynthOne", error)) {
+            midiOutStatus = "unavailable (" + error + ")";
+        } else {
+            std::string connectError;
+            if (!midiOut.connect(midiOutSpec, connectError)) {
+                midiOutStatus = midiOut.portName() + " (" + connectError + ")";
+            } else {
+                midiOutStatus = midiOut.portName() +
+                                (midiOutSpec == "all" ? " -> all destinations"
+                                                       : " -> " + midiOutSpec);
+                observer.midiOut = &midiOut;
+            }
+        }
+    }
+
     // -- render ------------------------------------------------------------
 
     // MIDI is applied at the top of the render callback so note handling and
@@ -258,6 +332,9 @@ int main(int argc, char **argv) {
               << " frames / poly " << engine.polyphony() << "\n"
               << "  [audio]   " << backend->name() << "  " << backend->description() << "\n"
               << "  [midi]    " << midiStatus << "\n";
+    if (observer.midiOut != nullptr || !midiOutSpec.empty()) {
+        std::cout << "  [midi-out] " << midiOutStatus << "\n";
+    }
     if (!presetName.empty()) {
         std::cout << "  [preset]  " << presetPosition << ": " << presetName << " [" << bank << "]\n";
     }

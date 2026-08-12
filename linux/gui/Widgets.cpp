@@ -539,6 +539,53 @@ bool ADSREditor(s1::Engine &engine, S1Parameter attack, S1Parameter decay, S1Par
     const ImVec2 p3(p2.x + sx, p2.y);
     const ImVec2 p4(p3.x + rx, origin.y + pad + h);
 
+    // Dragging a handle only moves its own segment; the algebra below inverts
+    // the placement formulas above, holding the other two durations (and, for
+    // the sustain corner, the segment widths' shared `total`) at their current
+    // value while solving for the one the handle actually controls. `w` is
+    // the offset from p0.x a handle would sit at for the segment it drags --
+    // e.g. for attack that is p1.x - p0.x -- clamped short of the full width
+    // since a segment claiming 100% of it would need an infinite duration.
+    bool changed = false;
+    const ImVec2 mouse = ImGui::GetIO().MousePos;
+    constexpr float kHitRadius = 9.0f;
+
+    auto dragHit = [&](const char *id, const ImVec2 &centre) {
+        const ImVec2 saved = ImGui::GetCursorScreenPos();
+        ImGui::SetCursorScreenPos(ImVec2(centre.x - kHitRadius, centre.y - kHitRadius));
+        ImGui::InvisibleButton(id, ImVec2(kHitRadius * 2.0f, kHitRadius * 2.0f));
+        const bool active = ImGui::IsItemActive();
+        ImGui::SetCursorScreenPos(saved);
+        return active;
+    };
+
+    if (dragHit("attack", p1)) {
+        // ax = w*A/(A+d+r+1) -- solve for A given the offset the mouse asks for.
+        const float target = std::clamp(mouse.x - p0.x, 0.0f, w * 0.98f);
+        const float A = target * (d + r + 1.0f) / (w - target);
+        engine.setParameter(attack, engine.positionToValue(attack, A, 1.0f));
+        changed = true;
+    }
+    if (dragHit("decaySustain", p2)) {
+        // x: ax+dx = w*(A+D)/(A+D+r+1) -- solve for D with A, r held fixed.
+        const float target = std::clamp(mouse.x - p0.x, 0.0f, w * 0.98f);
+        const float D = std::max(0.0f, target * (r + 1.0f) / (w - target) - a);
+        engine.setParameter(decay, engine.positionToValue(decay, D, 1.0f));
+        // y: p2.y = p0.y - h*s, independent of the other three.
+        const float S = std::clamp(1.0f - (mouse.y - (origin.y + pad)) / h, 0.0f, 1.0f);
+        engine.setParameter(sustain, S);
+        changed = true;
+    }
+    if (dragHit("release", p3)) {
+        // p4.x is fixed regardless of r (ax+dx+sx+rx always sums to w), so the
+        // release width is simply the gap between the handle and that edge:
+        // rx = w*R/(a+d+R+1) -- solve for R given that gap.
+        const float target = std::clamp((p0.x + w) - mouse.x, 0.0f, w * 0.98f);
+        const float R = target * (a + d + 1.0f) / (w - target);
+        engine.setParameter(release, engine.positionToValue(release, R, 1.0f));
+        changed = true;
+    }
+
     dl->AddQuadFilled(p0, p1, p2, ImVec2(p2.x, p0.y), (fill & 0x00FFFFFF) | 0x40000000);
     dl->AddQuadFilled(ImVec2(p2.x, p0.y), p2, p3, ImVec2(p3.x, p0.y),
                       (fill & 0x00FFFFFF) | 0x40000000);
@@ -546,10 +593,14 @@ bool ADSREditor(s1::Engine &engine, S1Parameter attack, S1Parameter decay, S1Par
 
     const ImVec2 pts[5] = {p0, p1, p2, p3, p4};
     dl->AddPolyline(pts, 5, fill, 0, 2.0f);
-    for (const ImVec2 &p : {p1, p2, p3}) dl->AddCircleFilled(p, 3.0f, fill, 12);
+    for (const ImVec2 &p : {p1, p2, p3}) {
+        const bool hot = ImGui::IsMouseHoveringRect(ImVec2(p.x - kHitRadius, p.y - kHitRadius),
+                                                     ImVec2(p.x + kHitRadius, p.y + kHitRadius));
+        dl->AddCircleFilled(p, hot ? 5.0f : 3.0f, fill, 12);
+    }
 
     ImGui::PopID();
-    return false; // handles are indicators; the knobs below do the editing
+    return changed;
 }
 
 bool TouchPadXY(const char *id, const ImVec2 &size, float &x, float &y, bool latched,

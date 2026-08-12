@@ -57,7 +57,12 @@ std::vector<std::string> availableBackends();
 /// ("wasapi", "directsound", "mme", "alsa", ...); empty means "choose", which
 /// on Windows prefers WASAPI over the MME device PortAudio would otherwise
 /// default to. It is ignored by backends that wrap a single driver, i.e. JACK.
+///
+/// `wasapiExclusive` (Windows only) asks PortAudio's WASAPI stream to bypass
+/// the shared-mode mixer -- the one route to genuinely low latency on
+/// Windows. Ignored outside WASAPI: a device on another host API, or another
+/// backend entirely, opens exactly as it would without the flag.
 std::unique_ptr<AudioBackend> makeBackend(const std::string &name, const std::string &hostApi,
-                                          std::string &error);
+                                          bool wasapiExclusive, std::string &error);
 
 } // namespace s1

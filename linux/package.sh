@@ -26,6 +26,9 @@ OUTDIR="$HERE/dist"
 BIN_SRC="$BUILD"          # where the binaries come from
 ARCH_OVERRIDE=""          # label the archive as this arch instead of the host's
 BINARIES=(synthone-gui synthone synthone-offline)
+# Needs PortAudio specifically (not just JACK), so unlike BINARIES this one is
+# not fatal to skip -- a JACK-only build still produces a complete archive.
+OPTIONAL_BINARIES=(latency_test)
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -58,6 +61,9 @@ fi
 for b in "${BINARIES[@]}"; do
     [ -x "$BIN_SRC/$b" ] || die "missing $BIN_SRC/$b"
 done
+for b in "${OPTIONAL_BINARIES[@]}"; do
+    [ -x "$BIN_SRC/$b" ] || say "$b not built (PortAudio not found?) -- skipping it"
+done
 
 # -- assemble ---------------------------------------------------------------
 
@@ -69,6 +75,9 @@ install -d "$ROOT/bin" "$ROOT/share/$APP_ID/DSP" "$ROOT/share/$APP_ID/Presets"
 
 for b in "${BINARIES[@]}"; do
     install -m 755 "$BIN_SRC/$b" "$ROOT/bin/$b"
+done
+for b in "${OPTIONAL_BINARIES[@]}"; do
+    [ -x "$BIN_SRC/$b" ] && install -m 755 "$BIN_SRC/$b" "$ROOT/bin/$b"
 done
 # Strip debug info; the binaries carry -g from the Release flags.
 # Host `strip` cannot handle a foreign architecture; skip it when cross-packaging.
@@ -161,7 +170,15 @@ Running
     synthone-offline --note 60 --seconds 4 out.wav      no audio hardware needed
 
 MIDI arrives on an ALSA sequencer port; by default it subscribes to every
-source it finds. `synthone --list-midi` lists them.
+source it finds. `synthone --list-midi` lists them. `synthone --midi-out`
+sends the actually-sounding notes out to another device or application.
+
+If bin/latency_test is present (needs PortAudio; skipped on a JACK-only
+build), it measures real round-trip audio latency -- run it with a loopback
+cable from output to input, or a software loopback device, connected:
+
+    bin/latency_test --list-devices
+    bin/latency_test --input-device N --output-device M
 
 
 Where things go

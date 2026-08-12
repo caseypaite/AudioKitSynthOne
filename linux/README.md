@@ -111,13 +111,27 @@ engine itself adds nothing -- a note-on is audible in the first sample of the
 block it lands in. MIDI arrives on an ALSA
 sequencer port (`--midi CLIENT:PORT`, or `all`, the default).
 
+MIDI can go out too, with `--midi-out CLIENT:PORT` (or `all`, off by
+default). It carries the notes as they actually sound -- after the arp and
+sequencer, not the raw keyboard MIDI in sees -- driven off the same
+notification the GUI uses to highlight the on-screen keyboard, so it costs
+nothing extra on the render thread.
+
 The same commands work on Windows, with two differences: there is no JACK, so
 `--backend portaudio` is the only choice and `--host-api` picks the driver
 family beneath it, and `--midi` takes a device index rather than `CLIENT:PORT`.
 Both are covered under [Windows](#windows-x86_64). The latency table above was
 measured on Linux and does not transfer -- MME, DirectSound and WASAPI each
-report their own figure, and none of them was verified by round-trip
-measurement.
+report their own figure, which is a claim from the driver, not a measurement.
+`build/latency_test` measures the real thing: it plays a click out one device
+and listens for its echo on another, so it needs a loopback path to mean
+anything -- a cable from line-out to line-in, or a software loopback device
+(`snd-aloop` on Linux, a virtual audio cable on Windows):
+
+```sh
+./build/latency_test --list-devices
+./build/latency_test --input-device 2 --output-device 1
+```
 
 Rendering without hardware:
 
@@ -230,16 +244,18 @@ default is. Override per machine with `--host-api wasapi|directsound|mme|wdmks`.
 Treat that as a choice of API, not a measured latency win. On the machine this
 was written on WASAPI *reports* 22 ms against MME's 5.8 ms and DirectSound's
 6.8 ms, and no round-trip measurement was made to settle which is genuinely
-lower — which is exactly why `--host-api` exists. WASAPI **exclusive** mode,
-the thing that would actually cut latency, is not wired up. ASIO is absent
-too: it needs Steinberg's licensed SDK, which cannot be redistributed.
+lower — which is exactly why `--host-api` exists. `--wasapi-exclusive` bypasses
+the shared-mode mixer — the one route to genuinely low latency WASAPI shared
+mode cannot offer — falling back to shared mode if a device refuses it (it is
+pickier about accepting a stream's exact format than shared mode is). ASIO is
+absent: it needs Steinberg's licensed SDK, which cannot be redistributed.
 
 **MIDI.** Input goes through WinMM, which has no notion of publishing a port
 other applications can connect to — an application only opens devices that
 already exist. So `--midi` takes a device *index* rather than ALSA's
 `CLIENT:PORT` (`--list-midi` numbers them; `all`, the default, opens every one).
 `N:0` is accepted too, so a command line copied from the Linux build still
-works.
+works. `--midi-out` is symmetric, taking the same device-index addressing.
 
 **What differs in the source.** Two files, plus one branch:
 
@@ -626,18 +642,18 @@ DSP→UI notifications go through the message ring, drained by the host.
 - **The GUI is a rebuild, not a port.** `synthone-gui` covers all six panels
   and every parameter, but it is drawn with Dear ImGui rather than the original
   PaintCode vector assets, so it does not look like the iOS app.
-- **Tunings travel with the app, not with presets.** The 117-scale library
-  loads and applies correctly, but a scale stored *inside* a preset
-  (`tuningName` / `tuningMasterSet`) is still ignored on load.
-- **MIDI in only.** No MIDI out, no MPE, no Ableton Link, no Audiobus/IAA.
-- **The ADSR editor is display-only** -- the curve tracks the parameters, but
-  editing is via the knobs beneath it rather than by dragging handles.
+- **No MPE, no Ableton Link, no Audiobus/IAA.** MPE would need per-note pitch
+  and timbre in the DSP note model that does not exist upstream on iOS
+  either -- new instrument design, not a port. Ableton Link is opt-in even on
+  iOS (its SDK cannot be redistributed) and is not built for Linux at all.
+  Audiobus/IAA are iOS-only inter-app-audio frameworks with no Linux/Windows
+  equivalent. MIDI *output* is supported -- see `--midi-out` above.
 - **Sample rate** is fixed at engine start; changing the JACK rate while
   running is not handled.
-- **On Windows, WASAPI exclusive mode and ASIO are not available** — the two
-  routes to genuinely low latency. Shared-mode WASAPI is what you get; ASIO
-  needs a licensed SDK that cannot be shipped. Actual round-trip latency has
-  not been measured on any Windows machine.
+- **On Windows, ASIO is not available** — it needs a licensed SDK that cannot
+  be shipped. `--wasapi-exclusive` is the other route to genuinely low
+  latency and is available (see [Windows](#windows-x86_64)). Actual
+  round-trip latency has not been measured on any Windows machine.
 - Presets that differ from the DSP default in mono/poly clear all voices on the
   first render after loading — upstream behaviour, invisible on iOS because the
   engine runs continuously. Load presets before playing, not between notes.
@@ -656,5 +672,6 @@ linux/
   host/                 JACK + PortAudio backends, ALSA and WinMM MIDI, CLI
   gui/                  Dear ImGui front end
   kiosk/                systemd unit, launcher and config for the Pi kiosk
-  tools/                synthone-offline, tunings extractor, screenshot capture
+  tools/                synthone-offline, tunings extractor, screenshot capture,
+                        round-trip latency measurement
 ```

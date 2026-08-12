@@ -9,6 +9,9 @@
 #include "AudioBackend.h"
 
 #include <portaudio.h>
+#ifdef _WIN32
+#include <pa_win_wasapi.h>
+#endif
 
 #include <algorithm>
 #include <cstdio>
@@ -114,7 +117,8 @@ std::vector<PaDeviceIndex> candidateOutputDevices(const std::string &hostApi,
 
 class PortAudioBackend : public AudioBackend {
 public:
-    explicit PortAudioBackend(std::string hostApi) : mHostApi(std::move(hostApi)) {}
+    PortAudioBackend(std::string hostApi, bool wasapiExclusive)
+        : mHostApi(std::move(hostApi)), mWasapiExclusive(wasapiExclusive) {}
 
     ~PortAudioBackend() override {
         stop();
@@ -177,6 +181,24 @@ public:
             params.suggestedLatency =
                 requestedLatencySec > 0.0 ? requestedLatencySec : periodSec;
             params.hostApiSpecificStreamInfo = nullptr;
+
+#ifdef _WIN32
+            // Exclusive mode is what actually cuts latency -- shared mode (the
+            // default) always goes through Windows' own mixer. It is also
+            // pickier about the stream format, so a device that refuses it
+            // below still falls through to the next candidate rather than
+            // failing outright.
+            PaWasapiStreamInfo wasapiInfo{};
+            const PaHostApiInfo *deviceApi = Pa_GetHostApiInfo(info->hostApi);
+            const bool isWasapi = deviceApi != nullptr && deviceApi->type == paWASAPI;
+            if (mWasapiExclusive && isWasapi) {
+                wasapiInfo.size = sizeof(PaWasapiStreamInfo);
+                wasapiInfo.hostApiType = paWASAPI;
+                wasapiInfo.version = 1;
+                wasapiInfo.flags = paWinWasapiExclusive;
+                params.hostApiSpecificStreamInfo = &wasapiInfo;
+            }
+#endif
 
             rc = Pa_OpenStream(&mStream, nullptr, &params, mSampleRate, mBufferFrames,
                                paClipOff, &PortAudioBackend::callbackTrampoline, this);
@@ -257,11 +279,13 @@ private:
     bool           mActive = false;
     std::string    mDeviceName;
     std::string    mHostApi;
+    bool           mWasapiExclusive = false;
     double         mOutputLatencySec = 0.0;
 };
 
-std::unique_ptr<AudioBackend> makePortAudioBackend(const std::string &hostApi) {
-    return std::make_unique<PortAudioBackend>(hostApi);
+std::unique_ptr<AudioBackend> makePortAudioBackend(const std::string &hostApi,
+                                                   bool wasapiExclusive) {
+    return std::make_unique<PortAudioBackend>(hostApi, wasapiExclusive);
 }
 
 } // namespace s1

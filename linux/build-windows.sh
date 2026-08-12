@@ -33,7 +33,7 @@ BUILD="$HERE/build-windows"
 OUTDIR="$HERE/dist"
 MINGW="${MINGW_PREFIX:-}"
 DO_PACKAGE=0
-BINARIES=(synthone-gui.exe synthone.exe synthone-offline.exe)
+BINARIES=(synthone-gui.exe synthone.exe synthone-offline.exe latency_test.exe)
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -122,6 +122,8 @@ data\ folders next to them, so keep the folder together.
   synthone-gui.exe        the synth, with its full interface
   synthone.exe            command-line host; play it from a MIDI keyboard
   synthone-offline.exe    render a preset to a .wav, no audio hardware needed
+  latency_test.exe        measure real round-trip audio latency (needs a
+                          loopback cable, or a virtual loopback device)
 
 Quick start:
 

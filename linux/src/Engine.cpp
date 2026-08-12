@@ -501,7 +501,10 @@ void Engine::setTuning12ET() {
         mKernel->setTuningTable(a4 * std::exp2((i - 69) / 12.f), i);
     }
     setTuningNotesPerOctave(12);
-    mCurrentTuning = 0;
+    // Not a library entry -- clears the tunings list's selection highlight and
+    // (per applyPreset) leaves tuning out of the next preset save, rather than
+    // aliasing library index 0.
+    mCurrentTuning = -1;
 }
 
 bool Engine::loadTunings(const std::string &path, std::string &error) {
@@ -849,6 +852,22 @@ bool Engine::savePreset(const std::string &bankName, int position, const std::st
     preset.objectValue["seqOctBoost"] = octBoosts;
     preset.objectValue["seqNoteOn"] = noteOns;
 
+    // Tuning: only when the current tuning is a named library entry -- 12-ET
+    // (mCurrentTuning == -1 at startup, or after a raw master set applied
+    // outside the library) has no name worth inventing, so the key is left
+    // out entirely rather than saving something misleading.
+    if (mCurrentTuning >= 0 && mCurrentTuning < static_cast<int>(mTunings.size())) {
+        const Tuning &tuning = mTunings[mCurrentTuning];
+        preset.objectValue["tuningName"] = makeString(tuning.name);
+        JsonValue masterSet;
+        masterSet.type = JsonValue::Type::Array;
+        for (double ratio : tuning.masterSet) masterSet.arrayValue.push_back(makeNumber(ratio));
+        preset.objectValue["tuningMasterSet"] = masterSet;
+    } else {
+        preset.objectValue.erase("tuningName");
+        preset.objectValue.erase("tuningMasterSet");
+    }
+
     preset.objectValue["name"] = makeString(name);
     preset.objectValue["bank"] = makeString(bankName);
     preset.objectValue["position"] = makeNumber(position);
@@ -978,6 +997,36 @@ bool Engine::applyPreset(const std::string &bankName, int position, std::string 
     }
 
     mKernel->resetSequencer();
+
+    // Tuning travels with the preset if it was saved with one; absent, the
+    // tuning already loaded (from the app or a previous preset) is left as is.
+    const JsonValue &tuningName = (*preset)["tuningName"];
+    const JsonValue &tuningMasterSet = (*preset)["tuningMasterSet"];
+    if (tuningName.isString()) {
+        int found = -1;
+        for (size_t i = 0; i < mTunings.size(); ++i) {
+            if (mTunings[i].name == tuningName.stringValue) { found = static_cast<int>(i); break; }
+        }
+        if (found >= 0) {
+            applyTuning(found);
+        } else if (tuningMasterSet.isArray()) {
+            std::vector<double> masterSet;
+            masterSet.reserve(tuningMasterSet.arrayValue.size());
+            for (const auto &v : tuningMasterSet.arrayValue) masterSet.push_back(v.asDouble());
+            // A raw set with no matching library entry doesn't correspond to any
+            // index -- leave mCurrentTuning unset so a later save doesn't claim
+            // an unrelated library name for it.
+            applyMasterSet(masterSet, tuningName.stringValue);
+            mCurrentTuning = -1;
+        }
+    } else if (tuningMasterSet.isArray()) {
+        std::vector<double> masterSet;
+        masterSet.reserve(tuningMasterSet.arrayValue.size());
+        for (const auto &v : tuningMasterSet.arrayValue) masterSet.push_back(v.asDouble());
+        applyMasterSet(masterSet, "");
+        mCurrentTuning = -1;
+    }
+
     return true;
 }
 

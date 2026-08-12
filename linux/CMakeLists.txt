@@ -266,7 +266,7 @@ target_link_libraries(synthone-offline PRIVATE synthone_core)
 # Both branches resolve into the same vocabulary, so the target definitions
 # below are written once:
 #
-#   S1_MIDI_SOURCE     the MidiInput implementation for this platform
+#   S1_MIDI_SOURCE     the MidiInput and MidiOutput implementations for this platform
 #   S1_MIDI_LIBS       what that implementation links against
 #   S1_MIDI_AVAILABLE  false when the platform's MIDI library is missing
 #   S1_JACK_LIB        JACK, or empty when unavailable
@@ -276,7 +276,7 @@ target_link_libraries(synthone-offline PRIVATE synthone_core)
 # ---------------------------------------------------------------------------
 
 if(WIN32)
-    set(S1_MIDI_SOURCE host/WinMidi.cpp)
+    set(S1_MIDI_SOURCE host/WinMidi.cpp host/WinMidiOut.cpp)
     set(S1_MIDI_LIBS winmm)
     set(S1_MIDI_AVAILABLE TRUE)
 
@@ -309,7 +309,7 @@ if(WIN32)
     set(S1_GLFW_LIB glfw)
     set(S1_GL_LIB opengl32)
 else()
-    set(S1_MIDI_SOURCE host/AlsaMidi.cpp)
+    set(S1_MIDI_SOURCE host/AlsaMidi.cpp host/AlsaMidiOut.cpp)
 
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(JACK IMPORTED_TARGET jack)
@@ -344,6 +344,21 @@ else()
         set(S1_GLFW_LIB PkgConfig::GLFW)
         set(S1_GL_LIB PkgConfig::GL)
     endif()
+endif()
+
+# ---------------------------------------------------------------------------
+# latency_test: round-trip latency measurement
+#
+# PortAudio only -- no MIDI, no JACK, no DSP engine -- so it is gated
+# separately and builds even where S1_MIDI_AVAILABLE is false.
+# ---------------------------------------------------------------------------
+
+if(S1_PORTAUDIO_LIB)
+    add_executable(latency_test tools/latency_test.cpp)
+    target_link_libraries(latency_test PRIVATE ${S1_PORTAUDIO_LIB})
+    target_compile_options(latency_test PRIVATE -Wall)
+else()
+    message(WARNING "PortAudio not found -- skipping latency_test.")
 endif()
 
 # ---------------------------------------------------------------------------

@@ -19,14 +19,19 @@
 #include <GLFW/glfw3.h>
 
 #include "MidiInput.h"
+#include "MidiOutput.h"
 #include "AudioBackend.h"
 #include "Engine.h"
 #include "Panels.h"
 #include "Widgets.h"
 
+#include <algorithm>
+
 namespace {
 
-/// Mirrors DSP notifications into the UI state.
+/// Mirrors DSP notifications into the UI state and, when `midiOut` is set,
+/// forwards the same notification to MIDI out -- see StatusObserver in
+/// host/main.cpp, which this matches.
 class UiObserver : public S1Protocol {
 public:
     explicit UiObserver(s1gui::UiState &ui) : mUi(ui) {}
@@ -43,10 +48,33 @@ public:
             if (notes.playingNotes[i].noteNumber >= 0) ++voices;
         }
         mUi.voiceCount = voices;
+
+        if (midiOut != nullptr) forwardToMidiOut(notes);
     }
 
+    s1::MidiOutput *midiOut = nullptr;
+
 private:
+    void forwardToMidiOut(const PlayingNotes &notes) {
+        for (int i = 0; i < S1_MAX_POLYPHONY; ++i) {
+            const bool sounding = i < notes.polyphony && notes.playingNotes[i].noteNumber >= 0;
+            const int newNote = sounding
+                ? std::clamp(notes.playingNotes[i].noteNumber + notes.playingNotes[i].transpose,
+                             0, 127)
+                : -1;
+            if (mLastNote[i] == newNote) continue;
+
+            if (mLastNote[i] >= 0) midiOut->noteOff(0, mLastNote[i], 0);
+            if (newNote >= 0) {
+                const int velocity = std::clamp(notes.playingNotes[i].velocity, 1, 127);
+                midiOut->noteOn(0, newNote, velocity);
+            }
+            mLastNote[i] = newNote;
+        }
+    }
+
     s1gui::UiState &mUi;
+    int mLastNote[S1_MAX_POLYPHONY] = {-1, -1, -1, -1, -1, -1};
 };
 
 /// Chrome density. The official Raspberry Pi 7" panel is 800x480, which is
@@ -149,6 +177,7 @@ int main(int argc, char **argv) {
     std::string resourceDir = s1::Engine::defaultResourceDir();
     std::string userDir;
     std::string midiSpec = "all";
+    std::string midiOutSpec;
     std::string tuningsPath = s1::Engine::defaultTuningsPath();
     int windowWidth = 1440, windowHeight = 900;
     bool fullscreen = false;
@@ -156,6 +185,7 @@ int main(int argc, char **argv) {
     bool geometryGiven = false;
     int  layoutOverride = -1;   // -1 = read it off the display, 0 = desktop, 1 = Pi
     std::string topPanelName, bottomPanelName;
+    bool wasapiExclusive = false;
 
     auto panelByName = [](const std::string &name, s1gui::Panel &out) {
         for (int i = 0; i < static_cast<int>(s1gui::Panel::Count); ++i) {
@@ -172,9 +202,11 @@ int main(int argc, char **argv) {
         auto next = [&]() -> std::string { return (i + 1 < argc) ? argv[++i] : std::string(); };
         if (arg == "--backend") backendName = next();
         else if (arg == "--host-api") hostApi = next();
+        else if (arg == "--wasapi-exclusive") wasapiExclusive = true;
         else if (arg == "--resources") resourceDir = next();
         else if (arg == "--user-dir") userDir = next();
         else if (arg == "--midi") midiSpec = next();
+        else if (arg == "--midi-out") midiOutSpec = next();
         else if (arg == "--tunings") tuningsPath = next();
         else if (arg == "--top") topPanelName = next();
         else if (arg == "--bottom") bottomPanelName = next();
@@ -192,8 +224,9 @@ int main(int argc, char **argv) {
         else if (arg == "--hide-cursor") hideCursor = true;
         else if (arg == "-h" || arg == "--help") {
             std::printf("usage: synthone-gui [--backend jack|portaudio] [--host-api NAME]\n"
-                        "       [--resources DIR]\n"
-                        "                    [--midi CLIENT:PORT|all] [--geometry WxH]\n"
+                        "       [--resources DIR] [--wasapi-exclusive]\n"
+                        "                    [--midi CLIENT:PORT|all] [--midi-out CLIENT:PORT|all]\n"
+                        "                    [--geometry WxH]\n"
                         "                    [--top PANEL] [--bottom PANEL]\n"
                         "                    [--fullscreen] [--hide-cursor]\n"
                         "                    [--compact | --no-compact]\n"
@@ -215,7 +248,7 @@ int main(int argc, char **argv) {
     if (backendName.empty()) backendName = backends.front();
 
     std::string error;
-    auto backend = s1::makeBackend(backendName, hostApi, error);
+    auto backend = s1::makeBackend(backendName, hostApi, wasapiExclusive, error);
     if (!backend || !backend->open(0, 0, 0.0, error)) {
         std::fprintf(stderr, "error: %s\n", error.c_str());
         return 1;
@@ -268,6 +301,12 @@ int main(int argc, char **argv) {
         midi.connect(midiSpec, ignored);
         midi.start(&midiQueue);
         midiStatus = midi.portName();
+    }
+
+    s1::MidiOutput midiOut;
+    if (!midiOutSpec.empty() && midiOut.open("SynthOne", error)) {
+        std::string ignored;
+        if (midiOut.connect(midiOutSpec, ignored)) observer.midiOut = &midiOut;
     }
 
     auto render = [&engine, &midiQueue](float *left, float *right, uint32_t frames) {
