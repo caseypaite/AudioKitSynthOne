@@ -7,14 +7,25 @@
 //  path as regular notes, exactly like any other MIDI keyboard, regardless
 //  of which MIDI channel the device sends on.
 //
-//  8 of the 16 pads (table indices 0-7 -- see parsePads()) are claimed as
-//  function pads via PadFilter (host/PadFilter.h): they stop playing notes
-//  entirely and become dedicated buttons instead. Bottom row (indices 0-3,
-//  silkscreened PAD1-4): reported outward as a PadReport for the host to
-//  turn into a GUI panel switch, since this driver has no UiState access of
-//  its own. Top row (indices 4-7, PAD5-8): handled internally via Engine& --
-//  panic, all-notes-off, arp on/off, arp<->sequencer mode. The remaining 8
-//  pads (table indices 8-15) are left unclaimed and play notes normally.
+//  The pad table has 16 entries, but the device only has 8 physical pads --
+//  per its own protocol (mpk3-settings/message.h's PADS_PER_BANK), the table
+//  is two banks of 8 for the same 8 pads, selected by the device's own pad
+//  Bank A/B toggle. This driver only reads Bank A (table indices 0-7 -- see
+//  parsePads()), which is the power-on default and what real-hardware
+//  testing exercised. Those 8 entries are claimed as function pads via
+//  PadFilter (host/PadFilter.h): they stop playing notes entirely and become
+//  dedicated buttons instead. Bottom row (indices 0-3, silkscreened PAD1-4):
+//  reported outward as a PadReport for the host to turn into a GUI panel
+//  switch, since this driver has no UiState access of its own. Top row
+//  (indices 4-7, PAD5-8): handled internally via Engine& -- panic,
+//  all-notes-off, arp on/off, arp<->sequencer mode. Table indices 8-15
+//  (Bank B's note/PC/CC values for those same 8 physical pads) are never
+//  read by this driver -- if a user toggles the device to Bank B, the same
+//  8 pads emit those unread values instead, which parsePads() has no claim
+//  on, so presses fall through and play notes normally instead of doing
+//  their assigned function. This degrades safely (no misfire, no crash) but
+//  is untested and effectively unsupported; nothing in the device's normal
+//  operation requires leaving Bank A.
 //
 //  This driver also gives the 8 knobs sensible default parameter targets
 //  (Engine::setDeviceDefaultCc), discovered by querying the device's own
@@ -22,9 +33,13 @@
 //
 //  Modes: the device's PAD CONTROLS row has a PROG SELECT button, a factory,
 //  no-reprogramming-required way to switch between up to 9 onboard "program"
-//  slots (0 = RAM/current, 1-8 = stored). Selecting one is expected to send a
-//  MIDI Program Change (this is the same mechanism Zynthian's own driver
-//  relies on for its mode switching). This driver treats each program number
+//  slots (0 = RAM/current, 1-8 = stored). Selecting one sends a MIDI Program
+//  Change, confirmed directly against real hardware (see below) -- not
+//  transcribed from Zynthian's driver, which switches its own modes via a
+//  different trigger (pads it has itself SysEx-reprogrammed to emit PC
+//  numbers outside the 0-8 slot range, not the device's factory PROG SELECT
+//  slots). Both are Program Change messages, but not the same mechanism.
+//  This driver treats each program number
 //  as a distinct knob-mapping "mode": onProgramChange() clears the current
 //  knob defaults and re-queries that slot's actual CC assignments, so the
 //  same 8 physical knobs can reach more than 8 parameters by switching
@@ -41,8 +56,8 @@
 //  so a wrong assumption degrades to "seed nothing" rather than a bad
 //  mapping.
 //
-//  Real-hardware status (a physical unit was available for one testing
-//  session): the *read* path -- sendQuery()/onSysEx()/parsePads()/
+//  Real-hardware status (a physical unit was available across two testing
+//  sessions): the *read* path -- sendQuery()/onSysEx()/parsePads()/
 //  parseKnobs(), the pad table, the knob table, all offsets above -- is
 //  confirmed correct: a live query against a real unit was decoded by hand
 //  against these exact offsets and matched what the driver itself bound.
@@ -51,13 +66,15 @@
 //  confirmed the *dispatch* logic end to end: a claimed top-row pad note
 //  silences voices without playing one, a claimed bottom-row pad note plays
 //  nothing either, and onProgramChange()/modeStatusText() correctly re-bind
-//  and re-report for modes 0-3 and an undesigned slot alike. Two things
-//  remain genuinely unconfirmed, since neither is exercisable without
-//  physically touching the device: whether PROG SELECT itself sends a
-//  Program Change (this driver only confirmed what happens *if* one
-//  arrives), and whether table index N truly corresponds to silkscreened
+//  and re-report for modes 0-3 and an undesigned slot alike. A second
+//  session then confirmed the one link synthetic injection couldn't reach:
+//  physically pressing PROG SELECT + the pad for a program number does send
+//  a Program Change, and modes 0-3 activate correctly end to end from the
+//  device's own buttons. What remains genuinely unconfirmed, since it isn't
+//  exercisable without a specific piece of information about a real unit's
+//  silkscreen: whether table index N truly corresponds to silkscreened
 //  PAD(N+1) (indices 0-3 = bottom row, 4-7 = top row) -- see "Known gaps" in
-//  the developer guide for both.
+//  the developer guide.
 //
 //  writeProgram() (CMD_WRITE_DATA) is confirmed working, on the second
 //  attempt. The first attempt sent a structurally malformed message (see

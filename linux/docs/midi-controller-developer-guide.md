@@ -568,10 +568,8 @@ of the framework's concern. The Akai MPK Mini mk3 happens to have a
 hardware-native one: its PAD CONTROLS row includes a **PROG SELECT** button
 that switches between the device's onboard program slots (0 = RAM/current,
 1-8 = stored) with no reprogramming required, and Zynthian's own driver
-already relies on this producing a Program Change -- see
-`AkaiMpkMiniMk3.cpp`'s file-header comment for the caveat that this specific
-assumption (PROG SELECT reliably sends PC) is unverified against real
-hardware here, same status as the rest of the protocol detail below.
+already relies on this producing a Program Change -- confirmed against real
+hardware here too, see `AkaiMpkMiniMk3.cpp`'s file-header comment.
 
 ![Akai MPK Mini mk3 with the PROG SELECT button and PAD CONTROLS row highlighted](images/mpk-progselect-annotated.png)
 
@@ -1155,8 +1153,8 @@ cycle. Both are left unbuilt rather than guessed at or risked.
   and the pad/mode dispatch logic (`onPadButton()`, `onProgramChange()`,
   `modeStatusText()`) was exercised end to end by injecting synthetic
   Note On/Program Change messages into a running instance. See
-  `AkaiMpkMiniMk3.cpp`'s file header for specifics and for the two things
-  that testing *couldn't* reach (below).
+  `AkaiMpkMiniMk3.cpp`'s file header for specifics and for what remains
+  unconfirmed (below).
 - **`writeProgram()`/CMD_WRITE_DATA: confirmed working**, after fixing a
   real bug an earlier attempt turned up (a duplicated program-slot byte
   producing a 255-byte message where the device expects 254 -- see
@@ -1164,15 +1162,12 @@ cycle. Both are left unbuilt rather than guessed at or risked.
   was run against a real MPK Mini mk3 and independently verified by
   re-querying and hand-decoding all 4 reprogrammed slots outside the driver
   entirely.
-- **Mode switching depends on PROG SELECT sending Program Change**, which is
-  the documented, Zynthian-precedented mechanism. This specific link --
-  does physically pressing PROG SELECT actually emit a PC message -- could
-  not be tested even with real hardware available, since confirming it
-  means pressing the button by hand; what *was* confirmed is everything
-  downstream of a PC arriving (see above). If PROG SELECT turns out not to
-  send PC (or sends something else), modes 1-3 simply never activate --
-  mode 0's behavior is unaffected either way, so this degrades safely, but
-  it's still untested.
+- **Mode switching (PROG SELECT sending Program Change): confirmed working**,
+  in a second real-hardware session after the one that confirmed the read
+  path above. Physically pressing PROG SELECT + the pad for a program number
+  on a real MPK Mini mk3 does emit a Program Change, and modes 0-3 activate
+  correctly end to end from the device's own buttons -- not just from
+  synthetic PC injection into a running instance.
 - Only 4 of the MPK's 9 program slots (0-3) have a designed mode; 4-8
   intentionally clear the knob defaults and stop there.
 - No hotplug detection (matches the rest of this port's MIDI handling).

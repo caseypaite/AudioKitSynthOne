@@ -193,13 +193,11 @@ the flag, never automatically.
 
 Mode switching depends on the device actually sending a MIDI Program Change
 when you use PROG SELECT -- this is the standard, documented mechanism (the
-same one Zynthian's own MPK driver relies on). Everything downstream of a
-Program Change arriving (re-binding the knobs, the status message above) is
-confirmed working against real hardware; whether PROG SELECT itself reliably
-sends one is the one link in this chain that's still unconfirmed, since
-that specifically requires pressing the physical button by hand. If
-switching modes doesn't do anything -- including no status message --
-see [Troubleshooting](#troubleshooting).
+same one Zynthian's own MPK driver relies on), and it's confirmed working
+end to end against real hardware: physically pressing PROG SELECT + the pad
+for a program number does send a Program Change, and modes 0-3 activate
+correctly. If switching modes doesn't do anything -- including no status
+message -- see [Troubleshooting](#troubleshooting).
 
 ### Where each knob shows up in the app (Mode 0)
 
@@ -583,15 +581,15 @@ which are a separate, independently-working path.
 **Switching modes with PROG SELECT doesn't change what the knobs control,
 or shows no status message at all.** The knobs should go briefly
 unresponsive and then pick up the new mode's mapping, and a status message
-("Mode N: ...") should appear either way. If neither happens, the device
-isn't sending a Program Change on PROG SELECT the way this driver expects
--- the one link in this feature that's still unconfirmed against real
-hardware even though everything downstream of it now is (see the developer
-guide). If the status message appears but the knobs don't respond, you're
-probably on a slot without a designed mode (only 0-3 have one) -- the
-message itself will say so ("Program N: knobs unbound (no designed mode)").
-Try slot 0 first to confirm the driver itself is working, then try 1-3. As
-always, MIDI Learn works regardless of mode switching.
+("Mode N: ...") should appear either way. This whole chain is confirmed
+working against real hardware, so if neither happens, check that your unit
+is actually sending on PROG SELECT the way its manual describes (this can
+vary slightly by firmware) before suspecting the driver. If the status
+message appears but the knobs don't respond, you're probably on a slot
+without a designed mode (only 0-3 have one) -- the message itself will say
+so ("Program N: knobs unbound (no designed mode)"). Try slot 0 first to
+confirm the driver itself is working, then try 1-3. As always, MIDI Learn
+works regardless of mode switching.
 
 **A pad plays a note instead of doing its function, or the wrong pad does
 the wrong thing.** On the Akai MPK Mini mk3, function pads are only claimed

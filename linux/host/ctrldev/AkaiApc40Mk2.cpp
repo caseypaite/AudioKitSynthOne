@@ -30,7 +30,8 @@
 //  notes 0x30-0x34, same channel-per-track scheme). Binding TRACK FADER to a
 //  target still works -- moving *any* of the 8 faders drives that one bound
 //  parameter, since this framework can't tell them apart -- so it's given
-//  exactly one target below rather than 8 (see kFaderTrackTarget). The 5
+//  exactly one target below rather than 8 (see kTrackFaderCc's binding in
+//  init()). The 5
 //  per-track buttons are left unclaimed entirely, for the same reason the 40
 //  clip-launch pads are: Synth One has no per-track concept for a specific
 //  track's button to mean anything, and claiming one channel-blind note
